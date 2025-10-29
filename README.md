@@ -92,17 +92,21 @@ personal-rag/
 - [DECISIONS.md](DECISIONS.md) - Architecture decision records
 - [CLAUDE.md](CLAUDE.md) - Detailed documentation
 - [HIGH-LEVEL-PLAN.md](HIGH-LEVEL-PLAN.md) - Implementation roadmap
+- [GOOGLE-OAUTH.md](GOOGLE-OAUTH.md) - **Google Drive setup guide** (step-by-step)
 
 ## Google Drive Setup
 
-To use Google Drive integration:
+To use Google Drive integration, see the comprehensive setup guide: **[GOOGLE-OAUTH.md](GOOGLE-OAUTH.md)**
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a new project
-3. Enable Google Drive API
-4. Create OAuth 2.0 credentials (Desktop application)
-5. Download credentials as `credentials.json` in project root
-6. First run will open browser for OAuth consent
+**Quick summary:**
+1. Create a Google Cloud project
+2. Enable Google Drive API
+3. Configure OAuth consent screen
+4. Create OAuth 2.0 credentials (Desktop app)
+5. Download `credentials.json` to project root
+6. Run ingestion - browser will open for authorization
+
+**Alternative (simpler):** Use [Google Drive Desktop](https://www.google.com/drive/download/) and ingest the synced local folder instead.
 
 ## Development
 
