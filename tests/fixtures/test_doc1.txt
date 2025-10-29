@@ -1,0 +1,13 @@
+Personal RAG System Overview
+
+This is a test document for the Personal RAG system. The system is designed to index and retrieve personal documents using vector embeddings and large language models.
+
+Key Features:
+- Document ingestion from multiple sources
+- Vector-based semantic search
+- Integration with OpenAI embeddings and GPT-5
+- Support for local files and Google Drive
+
+The chunking strategy uses recursive character splitting with a chunk size of 512 tokens and 50 token overlap. This helps preserve context at chunk boundaries while keeping chunks small enough for efficient retrieval.
+
+ChromaDB is used as the vector database for storing embeddings. It provides a simple API and persistent storage, making it ideal for MVP development.
