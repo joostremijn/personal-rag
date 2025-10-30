@@ -124,12 +124,12 @@ class GoogleDriveConnector(BaseConnector):
         max_results: int = 100,
         **kwargs: any,
     ) -> List[Document]:
-        """Fetch documents from Google Drive.
+        """Fetch documents from Google Drive with pagination support.
 
         Args:
             folder_id: Specific folder ID to fetch from (None = all accessible files)
             query: Custom Drive API query string
-            max_results: Maximum number of files to fetch
+            max_results: Maximum number of files to fetch (None = unlimited)
             **kwargs: Additional arguments (unused)
 
         Returns:
@@ -159,19 +159,39 @@ class GoogleDriveConnector(BaseConnector):
 
             logger.info(f"Fetching from Google Drive with query: {full_query}")
 
-            # Fetch file list
-            results = (
-                self.service.files()
-                .list(
-                    q=full_query,
-                    pageSize=max_results,
-                    fields="files(id, name, mimeType, createdTime, modifiedTime, "
-                    "owners, size, webViewLink)",
-                )
-                .execute()
-            )
+            # Fetch file list with pagination
+            files = []
+            page_token = None
+            page_size = min(1000, max_results) if max_results else 1000  # Google's max per page
 
-            files = results.get("files", [])
+            while True:
+                results = (
+                    self.service.files()
+                    .list(
+                        q=full_query,
+                        pageSize=page_size,
+                        pageToken=page_token,
+                        fields="nextPageToken, files(id, name, mimeType, createdTime, "
+                        "modifiedTime, owners, size, webViewLink)",
+                    )
+                    .execute()
+                )
+
+                batch = results.get("files", [])
+                files.extend(batch)
+                logger.info(f"Fetched {len(batch)} files (total: {len(files)})")
+
+                # Check if we've reached max_results
+                if max_results and len(files) >= max_results:
+                    files = files[:max_results]
+                    logger.info(f"Reached max_results limit of {max_results}")
+                    break
+
+                # Check for next page
+                page_token = results.get("nextPageToken")
+                if not page_token:
+                    break
+
             logger.info(f"Found {len(files)} files in Google Drive")
 
             # Fetch documents
@@ -291,10 +311,10 @@ class GoogleDriveConnector(BaseConnector):
             return ""
 
     def list_folders(self, parent_folder_id: Optional[str] = None) -> List[dict]:
-        """List folders in Google Drive.
+        """List folders in Google Drive with pagination support.
 
         Args:
-            parent_folder_id: Parent folder ID (None = root)
+            parent_folder_id: Parent folder ID (None = all folders)
 
         Returns:
             List of folder info dicts
@@ -307,18 +327,32 @@ class GoogleDriveConnector(BaseConnector):
             if parent_folder_id:
                 query += f" and '{parent_folder_id}' in parents"
 
-            results = (
-                self.service.files()
-                .list(
-                    q=query,
-                    pageSize=100,
-                    fields="files(id, name, createdTime, modifiedTime)",
-                )
-                .execute()
-            )
+            # Fetch all folders with pagination
+            folders = []
+            page_token = None
 
-            folders = results.get("files", [])
-            logger.info(f"Found {len(folders)} folders")
+            while True:
+                results = (
+                    self.service.files()
+                    .list(
+                        q=query,
+                        pageSize=1000,  # Max allowed by Google
+                        pageToken=page_token,
+                        fields="nextPageToken, files(id, name, createdTime, modifiedTime)",
+                    )
+                    .execute()
+                )
+
+                batch = results.get("files", [])
+                folders.extend(batch)
+                logger.info(f"Fetched {len(batch)} folders (total: {len(folders)})")
+
+                # Check for next page
+                page_token = results.get("nextPageToken")
+                if not page_token:
+                    break
+
+            logger.info(f"Found {len(folders)} total folders")
             return folders
 
         except Exception as e:
