@@ -44,6 +44,9 @@ Examples:
   # Ingest from specific folder (recently accessed only)
   python ingest.py --source-type gdrive --mode=accessed --folder-id "abc123xyz"
 
+  # Dry run - see what would be ingested without actually ingesting
+  python ingest.py --source-type gdrive --mode=accessed --max-results 10 --dry-run
+
   # Reset collection before ingesting
   python ingest.py --source ~/Documents/notes --source-type local --reset
 
@@ -120,6 +123,12 @@ Examples:
         "--list-folders",
         action="store_true",
         help="List Google Drive folders and exit (requires --source-type gdrive)",
+    )
+
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="List files that would be ingested without actually ingesting them",
     )
 
     parser.add_argument(
@@ -227,6 +236,25 @@ Examples:
 
         if not documents:
             logger.warning("No documents found to ingest")
+            return 0
+
+        # Dry run - just list files without ingesting
+        if args.dry_run:
+            print(f"\n=== Dry Run - Would Ingest {len(documents)} Documents ===\n")
+            for i, doc in enumerate(documents, 1):
+                print(f"{i}. {doc.metadata.title}")
+                print(f"   Source: {doc.metadata.source}")
+                print(f"   Type: {doc.metadata.file_type or 'N/A'}")
+                print(f"   Modified: {doc.metadata.modified_at.strftime('%Y-%m-%d %H:%M:%S') if doc.metadata.modified_at else 'N/A'}")
+                if doc.metadata.url:
+                    print(f"   URL: {doc.metadata.url}")
+                if doc.metadata.additional.get("viewed_by_me_time"):
+                    print(f"   Last Viewed: {doc.metadata.additional['viewed_by_me_time']}")
+                print(f"   Size: {len(doc.content)} characters")
+                print()
+
+            print(f"Total: {len(documents)} documents")
+            print("\nRun without --dry-run to actually ingest these files.")
             return 0
 
         # Ingest documents
