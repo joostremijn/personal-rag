@@ -74,9 +74,18 @@ Before creating credentials, you need to configure the OAuth consent screen:
 1. Go to **"APIs & Services"** → **"Credentials"** (left sidebar)
 2. Click **"+ Create Credentials"** at the top
 3. Select **"OAuth client ID"**
-4. Choose application type: **"Desktop app"**
-5. **Name**: `Personal RAG Desktop`
+4. **IMPORTANT**: Choose application type: **"Desktop app"**
+   - ⚠️ **NOT "Web application"** - that won't work!
+   - Desktop app is for applications running locally on your computer
+   - No need to fill in JavaScript origins or redirect URIs
+5. **Name**: `Personal RAG Desktop` (or any name you prefer)
 6. Click **"Create"**
+
+**Why Desktop app?**
+- Our Python script runs on your local machine
+- It opens your browser temporarily for authorization
+- Desktop app handles the localhost redirect automatically
+- Web application would require you to configure domains and won't work with our local script
 
 ### 5. Download Credentials
 

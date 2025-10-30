@@ -32,14 +32,23 @@ Examples:
   # Ingest from local directory
   python ingest.py --source ~/Documents/notes --source-type local
 
-  # Ingest from Google Drive (all accessible files)
-  python ingest.py --source-type gdrive
+  # Ingest from Google Drive (all accessible files, default mode)
+  python ingest.py --source-type gdrive --max-results 100
 
-  # Ingest from specific Google Drive folder
-  python ingest.py --source-type gdrive --folder-id "abc123xyz"
+  # Ingest recently accessed files (last 2 years, sorted by recency)
+  python ingest.py --source-type gdrive --mode=accessed --max-results 500
+
+  # Ingest recently accessed files (last 6 months)
+  python ingest.py --source-type gdrive --mode=accessed --days-back 180
+
+  # Ingest from specific folder (recently accessed only)
+  python ingest.py --source-type gdrive --mode=accessed --folder-id "abc123xyz"
 
   # Reset collection before ingesting
   python ingest.py --source ~/Documents/notes --source-type local --reset
+
+  # List Google Drive folders
+  python ingest.py --source-type gdrive --list-folders
 
   # View collection statistics
   python ingest.py --stats
@@ -70,6 +79,23 @@ Examples:
         type=int,
         default=100,
         help="Maximum number of files to fetch from Google Drive (default: 100)",
+    )
+
+    parser.add_argument(
+        "--mode",
+        type=str,
+        choices=["drive", "accessed"],
+        default="drive",
+        help="Google Drive ingestion mode: 'drive' for all files (default), "
+        "'accessed' for recently accessed files sorted by recency",
+    )
+
+    parser.add_argument(
+        "--days-back",
+        type=int,
+        default=730,
+        help="Number of days to look back for accessed files (default: 730 = ~2 years). "
+        "Only used with --mode=accessed",
     )
 
     parser.add_argument(
@@ -191,6 +217,8 @@ Examples:
             documents = connector.fetch_documents(
                 folder_id=args.folder_id,
                 max_results=args.max_results,
+                mode=args.mode,
+                days_back=args.days_back,
             )
 
         else:

@@ -4,7 +4,7 @@ import io
 import logging
 import os
 import pickle
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional
 
@@ -122,6 +122,8 @@ class GoogleDriveConnector(BaseConnector):
         folder_id: Optional[str] = None,
         query: Optional[str] = None,
         max_results: int = 100,
+        mode: str = "drive",
+        days_back: int = 730,
         **kwargs: any,
     ) -> List[Document]:
         """Fetch documents from Google Drive with pagination support.
@@ -130,6 +132,8 @@ class GoogleDriveConnector(BaseConnector):
             folder_id: Specific folder ID to fetch from (None = all accessible files)
             query: Custom Drive API query string
             max_results: Maximum number of files to fetch (None = unlimited)
+            mode: Ingestion mode - "drive" for all files, "accessed" for recently accessed
+            days_back: Number of days to look back (only for accessed mode)
             **kwargs: Additional arguments (unused)
 
         Returns:
@@ -155,6 +159,21 @@ class GoogleDriveConnector(BaseConnector):
                 query_parts.append(f"({' or '.join(mime_queries)})")
                 query_parts.append("trashed=false")
 
+            # Add time-based filtering for accessed mode
+            order_by = None
+            if mode == "accessed":
+                cutoff_date = datetime.now() - timedelta(days=days_back)
+                cutoff_str = cutoff_date.strftime("%Y-%m-%dT%H:%M:%S")
+
+                # Filter by viewedByMeTime only (modifiedByMeTime not supported in queries)
+                time_filter = f"viewedByMeTime > '{cutoff_str}'"
+                query_parts.append(time_filter)
+
+                # Sort by most recently viewed
+                order_by = "viewedByMeTime desc"
+
+                logger.info(f"Using accessed mode: files viewed in last {days_back} days")
+
             full_query = " and ".join(query_parts)
 
             logger.info(f"Fetching from Google Drive with query: {full_query}")
@@ -165,17 +184,20 @@ class GoogleDriveConnector(BaseConnector):
             page_size = min(1000, max_results) if max_results else 1000  # Google's max per page
 
             while True:
-                results = (
-                    self.service.files()
-                    .list(
-                        q=full_query,
-                        pageSize=page_size,
-                        pageToken=page_token,
-                        fields="nextPageToken, files(id, name, mimeType, createdTime, "
-                        "modifiedTime, owners, size, webViewLink)",
-                    )
-                    .execute()
-                )
+                # Build API request parameters
+                list_params = {
+                    "q": full_query,
+                    "pageSize": page_size,
+                    "pageToken": page_token,
+                    "fields": "nextPageToken, files(id, name, mimeType, createdTime, "
+                    "modifiedTime, modifiedByMeTime, viewedByMeTime, owners, size, webViewLink)",
+                }
+
+                # Add orderBy if specified
+                if order_by:
+                    list_params["orderBy"] = order_by
+
+                results = self.service.files().list(**list_params).execute()
 
                 batch = results.get("files", [])
                 files.extend(batch)
@@ -263,7 +285,15 @@ class GoogleDriveConnector(BaseConnector):
                 logger.warning(f"Empty content for file: {file_name}")
                 return None
 
-            # Build metadata
+            # Build metadata with access times
+            additional_metadata = {}
+
+            # Add access time information if available
+            if file_info.get("viewedByMeTime"):
+                additional_metadata["viewed_by_me_time"] = file_info["viewedByMeTime"]
+            if file_info.get("modifiedByMeTime"):
+                additional_metadata["modified_by_me_time"] = file_info["modifiedByMeTime"]
+
             metadata = DocumentMetadata(
                 source=file_id,
                 source_type=self.source_type,
@@ -278,6 +308,7 @@ class GoogleDriveConnector(BaseConnector):
                 file_type=mime_config["ext"],
                 file_size=file_info.get("size"),
                 url=file_info.get("webViewLink"),
+                additional=additional_metadata,
             )
 
             return Document(content=content, metadata=metadata)
