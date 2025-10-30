@@ -228,6 +228,7 @@ Examples:
                 max_results=args.max_results,
                 mode=args.mode,
                 days_back=args.days_back,
+                metadata_only=args.dry_run,  # Skip content download for dry-run
             )
 
         else:
@@ -250,7 +251,20 @@ Examples:
                     print(f"   URL: {doc.metadata.url}")
                 if doc.metadata.additional.get("viewed_by_me_time"):
                     print(f"   Last Viewed: {doc.metadata.additional['viewed_by_me_time']}")
-                print(f"   Size: {len(doc.content)} characters")
+
+                # Show file size (bytes for Drive files, character count for local)
+                if doc.metadata.file_size:
+                    # Convert bytes to human-readable format
+                    size_bytes = int(doc.metadata.file_size)
+                    if size_bytes < 1024:
+                        size_str = f"{size_bytes} bytes"
+                    elif size_bytes < 1024 * 1024:
+                        size_str = f"{size_bytes / 1024:.1f} KB"
+                    else:
+                        size_str = f"{size_bytes / (1024 * 1024):.1f} MB"
+                    print(f"   Size: {size_str}")
+                elif doc.content:
+                    print(f"   Size: {len(doc.content)} characters")
                 print()
 
             print(f"Total: {len(documents)} documents")

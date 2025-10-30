@@ -124,6 +124,7 @@ class GoogleDriveConnector(BaseConnector):
         max_results: int = 100,
         mode: str = "drive",
         days_back: int = 730,
+        metadata_only: bool = False,
         **kwargs: any,
     ) -> List[Document]:
         """Fetch documents from Google Drive with pagination support.
@@ -134,6 +135,7 @@ class GoogleDriveConnector(BaseConnector):
             max_results: Maximum number of files to fetch (None = unlimited)
             mode: Ingestion mode - "drive" for all files, "accessed" for recently accessed
             days_back: Number of days to look back (only for accessed mode)
+            metadata_only: If True, only fetch metadata without downloading content (much faster)
             **kwargs: Additional arguments (unused)
 
         Returns:
@@ -219,11 +221,14 @@ class GoogleDriveConnector(BaseConnector):
             # Fetch documents
             documents = []
             for file_info in files:
-                doc = self._fetch_file(file_info)
+                doc = self._fetch_file(file_info, metadata_only=metadata_only)
                 if doc:
                     documents.append(doc)
 
-            logger.info(f"Successfully loaded {len(documents)} documents from Google Drive")
+            if metadata_only:
+                logger.info(f"Fetched metadata for {len(documents)} documents from Google Drive")
+            else:
+                logger.info(f"Successfully loaded {len(documents)} documents from Google Drive")
             return documents
 
         except HttpError as e:
@@ -233,11 +238,12 @@ class GoogleDriveConnector(BaseConnector):
             logger.error(f"Error fetching from Google Drive: {e}")
             return []
 
-    def _fetch_file(self, file_info: dict) -> Optional[Document]:
+    def _fetch_file(self, file_info: dict, metadata_only: bool = False) -> Optional[Document]:
         """Fetch a single file from Google Drive.
 
         Args:
             file_info: File metadata from Drive API
+            metadata_only: If True, only fetch metadata without downloading content
 
         Returns:
             Document or None if fetch failed
@@ -256,34 +262,38 @@ class GoogleDriveConnector(BaseConnector):
 
             mime_config = self.SUPPORTED_MIME_TYPES[mime_type]
 
-            if "export" in mime_config:
-                # Google Docs, Sheets, etc. - export as specific format
-                request = self.service.files().export_media(
-                    fileId=file_id, mimeType=mime_config["export"]
-                )
+            # Skip content download if metadata_only
+            if metadata_only:
+                content = ""  # Empty content for metadata-only mode
             else:
-                # Regular files - download directly
-                request = self.service.files().get_media(fileId=file_id)
+                if "export" in mime_config:
+                    # Google Docs, Sheets, etc. - export as specific format
+                    request = self.service.files().export_media(
+                        fileId=file_id, mimeType=mime_config["export"]
+                    )
+                else:
+                    # Regular files - download directly
+                    request = self.service.files().get_media(fileId=file_id)
 
-            # Download content
-            file_data = io.BytesIO()
-            downloader = MediaIoBaseDownload(file_data, request)
-            done = False
-            while not done:
-                status, done = downloader.next_chunk()
+                # Download content
+                file_data = io.BytesIO()
+                downloader = MediaIoBaseDownload(file_data, request)
+                done = False
+                while not done:
+                    status, done = downloader.next_chunk()
 
-            file_data.seek(0)
+                file_data.seek(0)
 
-            # Parse content based on type
-            if mime_type == "application/pdf":
-                content = self._parse_pdf_bytes(file_data)
-            else:
-                # Text-based content
-                content = file_data.read().decode("utf-8", errors="ignore")
+                # Parse content based on type
+                if mime_type == "application/pdf":
+                    content = self._parse_pdf_bytes(file_data)
+                else:
+                    # Text-based content
+                    content = file_data.read().decode("utf-8", errors="ignore")
 
-            if not content or not content.strip():
-                logger.warning(f"Empty content for file: {file_name}")
-                return None
+                if not content or not content.strip():
+                    logger.warning(f"Empty content for file: {file_name}")
+                    return None
 
             # Build metadata with access times
             additional_metadata = {}
