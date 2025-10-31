@@ -28,7 +28,7 @@ def test_chroma_collection():
         Tuple of (client, collection_name) for test use
     """
     collection_name = f"test_{uuid.uuid4().hex[:8]}"
-    client = chromadb.Client(Settings=ChromaSettings(anonymized_telemetry=False))
+    client = chromadb.Client(settings=ChromaSettings(anonymized_telemetry=False))
     collection = client.create_collection(name=collection_name)
 
     yield client, collection_name
