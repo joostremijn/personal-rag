@@ -1,8 +1,8 @@
 """Ingestion pipeline for processing and storing documents."""
 
+import hashlib
 import logging
 import time
-import uuid
 from typing import List, Optional
 
 import chromadb
@@ -147,32 +147,34 @@ class IngestionPipeline:
         embeddings = [chunk.embedding for chunk in chunks]
         metadatas = [chunk.metadata.to_dict() for chunk in chunks]
 
-        # Add to collection in batches
+        # Upsert to collection in batches (updates existing, adds new)
         batch_size = 100
         for i in range(0, len(chunks), batch_size):
             batch_end = min(i + batch_size, len(chunks))
 
-            self.collection.add(
+            self.collection.upsert(
                 ids=ids[i:batch_end],
                 documents=documents[i:batch_end],
                 embeddings=embeddings[i:batch_end],
                 metadatas=metadatas[i:batch_end],
             )
 
-            logger.debug(f"Stored batch {i // batch_size + 1} ({batch_end - i} chunks)")
+            logger.debug(f"Upserted batch {i // batch_size + 1} ({batch_end - i} chunks)")
 
     def _generate_chunk_id(self, chunk: DocumentChunk) -> str:
-        """Generate unique ID for a chunk.
+        """Generate deterministic ID for a chunk.
 
         Args:
             chunk: Document chunk
 
         Returns:
-            Unique ID string
+            Deterministic ID string based on source and chunk index
         """
-        # Use source + chunk index for reproducibility
-        source_hash = str(hash(chunk.metadata.source))[-8:]
-        return f"{source_hash}_{chunk.metadata.chunk_index}_{uuid.uuid4().hex[:8]}"
+        # Use source + chunk index for deterministic, reproducible IDs
+        # This allows upsert to update existing chunks instead of duplicating
+        # Use hashlib instead of hash() for deterministic hashing across runs
+        source_hash = hashlib.md5(chunk.metadata.source.encode()).hexdigest()[:8]
+        return f"{source_hash}_{chunk.metadata.chunk_index}"
 
     def get_collection_stats(self) -> dict:
         """Get statistics about the collection.
