@@ -127,6 +127,7 @@ class GoogleDriveConnector(BaseConnector):
         mode: str = "drive",
         days_back: int = 730,
         metadata_only: bool = False,
+        should_skip_callback: Optional[callable] = None,
         **kwargs: any,
     ) -> List[Document]:
         """Fetch documents from Google Drive with pagination support.
@@ -138,6 +139,9 @@ class GoogleDriveConnector(BaseConnector):
             mode: Ingestion mode - "drive" for all files, "accessed" for recently accessed
             days_back: Number of days to look back (only for accessed mode)
             metadata_only: If True, only fetch metadata without downloading content (much faster)
+            should_skip_callback: Optional callback(source, modified_at, title) -> bool
+                                 If provided, will be called before downloading each file's content.
+                                 Return True to skip download, False to proceed.
             **kwargs: Additional arguments (unused)
 
         Returns:
@@ -222,10 +226,30 @@ class GoogleDriveConnector(BaseConnector):
 
             # Fetch documents
             documents = []
+            skipped_count = 0
             for file_info in files:
+                # Check if we should skip this file before downloading content
+                skip_download = False
+                if should_skip_callback and not metadata_only:
+                    # Extract metadata for skip check
+                    file_id = file_info["id"]
+                    file_name = file_info["name"]
+                    modified_at = datetime.fromisoformat(
+                        file_info["modifiedTime"].replace("Z", "+00:00")
+                    )
+
+                    # Call the callback to check if we should skip
+                    if should_skip_callback(file_id, modified_at, file_name):
+                        logger.debug(f"Skipping download for unchanged file: {file_name}")
+                        skipped_count += 1
+                        continue
+
                 doc = self._fetch_file(file_info, metadata_only=metadata_only)
                 if doc:
                     documents.append(doc)
+
+            if skipped_count > 0:
+                logger.info(f"Skipped downloading {skipped_count} unchanged files")
 
             if metadata_only:
                 logger.info(f"Fetched metadata for {len(documents)} documents from Google Drive")

@@ -139,6 +139,7 @@ class IngestionStats(BaseModel):
 
     total_documents: int = Field(default=0, description="Total documents processed")
     total_chunks: int = Field(default=0, description="Total chunks created")
+    skipped_documents: int = Field(default=0, description="Documents skipped (unchanged)")
     failed_documents: int = Field(default=0, description="Number of failed documents")
     processing_time: float = Field(default=0.0, description="Total processing time in seconds")
     failed_files: List[str] = Field(default_factory=list, description="List of failed file paths")

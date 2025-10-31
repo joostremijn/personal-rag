@@ -3,6 +3,7 @@
 import hashlib
 import logging
 import time
+from datetime import datetime, timezone
 from typing import List, Optional
 
 import chromadb
@@ -61,8 +62,190 @@ class IngestionPipeline:
             f"({self.collection.count()} existing documents)"
         )
 
+    def should_skip_document(self, doc: Document) -> bool:
+        """Check if document should be skipped based on existing index.
+
+        Args:
+            doc: Document to check
+
+        Returns:
+            True if document should be skipped, False if it needs (re)indexing
+        """
+        return self._should_skip(doc.metadata.source, doc.metadata.modified_at, doc.metadata.title)
+
+    def should_skip_by_metadata(self, source: str, modified_at: Optional[datetime], title: str) -> bool:
+        """Check if document should be skipped based only on metadata (no content needed).
+
+        This is useful for deciding whether to download content from remote sources.
+
+        Args:
+            source: Document source identifier
+            modified_at: Document modification timestamp
+            title: Document title (for logging)
+
+        Returns:
+            True if document should be skipped, False if it needs (re)indexing
+        """
+        return self._should_skip(source, modified_at, title)
+
+    def _should_skip(self, source: str, modified_at: Optional[datetime], title: str) -> bool:
+        """Internal method to check if document should be skipped.
+
+        Args:
+            source: Document source identifier
+            modified_at: Document modification timestamp
+            title: Document title (for logging)
+
+        Returns:
+            True if document should be skipped, False if it needs (re)indexing
+        """
+        # Query for existing chunks from this source
+        try:
+            source_hash = hashlib.md5(source.encode()).hexdigest()[:8]
+            # Query for any chunk from this source (we just need one to check timestamp)
+            results = self.collection.get(
+                ids=[f"{source_hash}_0"],  # Check first chunk
+                include=["metadatas"]
+            )
+
+            if not results or not results["ids"]:
+                # Document not in index yet
+                logger.debug(f"Document not indexed yet: {title}")
+                return False
+
+            # Get the ingested_at timestamp
+            metadata = results["metadatas"][0]
+            if "ingested_at" not in metadata:
+                # Old chunk without timestamp, re-index
+                logger.debug(f"Document has no timestamp, re-indexing: {title}")
+                return False
+
+            ingested_at = datetime.fromisoformat(metadata["ingested_at"])
+
+            # Make ingested_at timezone-aware if it isn't already (for comparison)
+            if ingested_at.tzinfo is None:
+                ingested_at = ingested_at.replace(tzinfo=timezone.utc)
+
+            # Check if document was modified after last ingestion
+            if modified_at:
+                # Make modified_at timezone-aware if needed
+                if modified_at.tzinfo is None:
+                    modified_at = modified_at.replace(tzinfo=timezone.utc)
+
+                if modified_at > ingested_at:
+                    logger.info(f"Document modified since last index, will re-index: {title}")
+                    return False
+
+            # Document exists and hasn't been modified, skip it
+            logger.info(f"Skipping unchanged document: {title}")
+            return True
+
+        except Exception as e:
+            logger.warning(f"Error checking document status for {source}: {e}")
+            # On error, be safe and re-index
+            return False
+
+    def ingest_documents_incremental(
+        self,
+        documents: List[Document],
+        skip_unchanged: bool = True,
+        batch_size: int = 10,
+    ) -> IngestionStats:
+        """Ingest documents incrementally with progress reporting.
+
+        Processes documents in batches, shows progress, and optionally skips
+        unchanged documents based on modification time.
+
+        Args:
+            documents: List of documents to ingest
+            skip_unchanged: Skip documents that haven't been modified since last index
+            batch_size: Number of documents to process before storing batch
+
+        Returns:
+            Ingestion statistics
+        """
+        start_time = time.time()
+        stats = IngestionStats()
+
+        if not documents:
+            logger.warning("No documents to ingest")
+            return stats
+
+        total_docs = len(documents)
+        logger.info(f"Starting incremental ingestion of {total_docs} documents (batch_size={batch_size})")
+
+        batch_chunks: List[DocumentChunk] = []
+        processed = 0
+
+        for i, doc in enumerate(documents, 1):
+            try:
+                # Check if we should skip this document
+                if skip_unchanged and self.should_skip_document(doc):
+                    stats.skipped_documents += 1
+                    continue
+
+                # Show progress
+                logger.info(f"Processing {i}/{total_docs}: {doc.metadata.title}")
+
+                # Chunk document
+                chunks = self.chunker.chunk_document(doc)
+                if chunks:
+                    batch_chunks.extend(chunks)
+                    stats.total_documents += 1
+                    processed += 1
+                else:
+                    stats.failed_documents += 1
+                    stats.failed_files.append(doc.metadata.source)
+                    logger.warning(f"No chunks created for: {doc.metadata.title}")
+
+                # Process batch when full or at end
+                if len(batch_chunks) >= batch_size * 5 or i == total_docs:  # ~5 chunks per doc avg
+                    if batch_chunks:
+                        self._process_and_store_batch(batch_chunks, stats)
+                        logger.info(f"Progress: {processed} processed, {stats.skipped_documents} skipped, {stats.failed_documents} failed")
+                        batch_chunks = []
+
+            except Exception as e:
+                logger.error(f"Error processing document {doc.metadata.source}: {e}")
+                stats.failed_documents += 1
+                stats.failed_files.append(doc.metadata.source)
+
+        # Process any remaining chunks
+        if batch_chunks:
+            self._process_and_store_batch(batch_chunks, stats)
+
+        stats.processing_time = time.time() - start_time
+
+        logger.info(
+            f"Ingestion complete: {stats.total_documents} processed, {stats.skipped_documents} skipped, "
+            f"{stats.total_chunks} chunks in {stats.processing_time:.2f}s"
+        )
+
+        if stats.failed_documents > 0:
+            logger.warning(f"Failed to process {stats.failed_documents} documents")
+
+        return stats
+
+    def _process_and_store_batch(self, chunks: List[DocumentChunk], stats: IngestionStats) -> None:
+        """Process and store a batch of chunks.
+
+        Args:
+            chunks: List of chunks to process
+            stats: Stats object to update
+        """
+        try:
+            # Generate embeddings
+            embedded_chunks = self.embedding_service.embed_chunks(chunks)
+            # Store in ChromaDB
+            self._store_chunks(embedded_chunks)
+            stats.total_chunks += len(embedded_chunks)
+            logger.debug(f"Stored batch of {len(embedded_chunks)} chunks")
+        except Exception as e:
+            logger.error(f"Error processing batch: {e}")
+            raise
+
     def ingest_documents(self, documents: List[Document]) -> IngestionStats:
-        """Ingest documents into the vector database.
+        """Ingest documents into the vector database (legacy batch method).
 
         Args:
             documents: List of documents to ingest
