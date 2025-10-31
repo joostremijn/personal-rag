@@ -223,12 +223,22 @@ Examples:
                 logger.error("Failed to connect to Google Drive")
                 return 1
 
+            # Create callback for skipping unchanged files (avoid downloading)
+            should_skip_callback = None
+            if not args.dry_run:
+                # Only use skip callback when not in dry-run mode
+                # (dry-run uses metadata_only which skips downloads anyway)
+                should_skip_callback = lambda source, modified_at, title: pipeline.should_skip_by_metadata(
+                    source, modified_at, title
+                )
+
             documents = connector.fetch_documents(
                 folder_id=args.folder_id,
                 max_results=args.max_results,
                 mode=args.mode,
                 days_back=args.days_back,
                 metadata_only=args.dry_run,  # Skip content download for dry-run
+                should_skip_callback=should_skip_callback,  # Skip download for unchanged files
             )
 
         else:
@@ -271,15 +281,20 @@ Examples:
             print("\nRun without --dry-run to actually ingest these files.")
             return 0
 
-        # Ingest documents
+        # Ingest documents (using incremental method for better progress reporting and memory efficiency)
         logger.info(f"Starting ingestion of {len(documents)} documents")
-        stats = pipeline.ingest_documents(documents)
+        stats = pipeline.ingest_documents_incremental(
+            documents,
+            skip_unchanged=True,  # Skip documents that haven't been modified
+            batch_size=5  # Process 5 documents at a time (more frequent updates)
+        )
 
         # Print summary
         print("\n=== Ingestion Summary ===")
-        print(f"Total documents: {stats.total_documents}")
-        print(f"Total chunks: {stats.total_chunks}")
+        print(f"Processed documents: {stats.total_documents}")
+        print(f"Skipped (unchanged): {stats.skipped_documents}")
         print(f"Failed documents: {stats.failed_documents}")
+        print(f"Total chunks: {stats.total_chunks}")
         print(f"Processing time: {stats.processing_time:.2f}s")
 
         if stats.failed_files:
