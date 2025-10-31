@@ -269,6 +269,29 @@ python query.py "search for unique text from document" --top-k 1
 - Not loading → Check logs, verify OpenAI API key
 - Empty collection → Run ingestion first
 
+## Testing
+
+Comprehensive test suite with 46+ tests covering all functionality.
+
+```bash
+# Run all tests (except E2E)
+pytest tests/ --ignore=tests/e2e/
+
+# Fast unit tests only
+pytest tests/unit/
+
+# With coverage report
+pytest tests/ --ignore=tests/e2e/ --cov=src --cov-report=html
+# Open htmlcov/index.html
+```
+
+**Test categories:**
+- Unit tests: Fast (<3s), mocked dependencies - **41 tests**
+- Integration: Real ChromaDB (~1s), mocked APIs - **5 tests**
+- E2E: Real APIs (manual only, costs money)
+
+See `tests/README.md` for details.
+
 ## Key Concepts
 
 **Chunking**: 512 tokens per chunk, 50 token overlap, recursive text splitting
