@@ -112,6 +112,8 @@ class GoogleDriveConnector(BaseConnector):
             # Save credentials for future use
             with open(token_file, "wb") as token:
                 pickle.dump(creds, token)
+            # Set secure permissions (owner read/write only)
+            os.chmod(token_file, 0o600)
             logger.info(f"Saved credentials to {token_file}")
 
         self.creds = creds
