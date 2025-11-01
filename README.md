@@ -13,6 +13,15 @@ A Retrieval-Augmented Generation (RAG) system for indexing and querying personal
 - ⚡ **Fast Retrieval** - ChromaDB vector database for efficient querying
 - 🔄 **Flexible Modes** - "Accessed mode" for recently viewed files only
 - 🌐 **REST API** - FastAPI backend for programmatic access
+- 🤖 **Background Daemon** - Automated ingestion with scheduling and monitoring
+
+---
+
+**👉 New to Personal RAG? Start here:** **[GETTING-STARTED.md](GETTING-STARTED.md)**
+
+Complete step-by-step tutorial for first-time users, covering installation, first ingestion, querying, and daemon setup.
+
+---
 
 ## Quick Start
 
@@ -140,6 +149,37 @@ curl -X POST http://localhost:8000/query \
 - `POST /query` - Query documents and get AI-generated answer
 - `GET /stats` - Collection statistics
 
+### 3. Automated Ingestion (Background Daemon)
+
+Keep your documents up-to-date automatically with the background daemon.
+
+```bash
+# Start daemon (runs ingestion every 60 minutes by default)
+python daemon.py
+
+# Access web dashboard
+open http://localhost:8001
+
+# Check status via CLI
+python daemon_cli.py status
+
+# Trigger manual ingestion
+python daemon_cli.py trigger
+
+# Configure interval and mode
+python daemon_cli.py config --interval 30 --mode plugged-in-only
+```
+
+**Features:**
+- 📅 Scheduled ingestion (10/30/60 minute intervals)
+- 🖥️ Web dashboard for monitoring and control
+- ⚡ CLI for remote management
+- 🔋 Smart execution (only when Mac is awake or plugged in)
+- 📊 Run history and statistics
+- 🔔 macOS notifications on failures
+
+See **[docs/DAEMON.md](docs/DAEMON.md)** for complete daemon documentation.
+
 ## Configuration
 
 ### Environment Variables (.env)
@@ -227,8 +267,10 @@ python query.py "unique text from document" --top-k 1
 
 ## Documentation
 
+- **[GETTING-STARTED.md](GETTING-STARTED.md)** - **Start here!** Step-by-step beginner tutorial
 - **[CLAUDE.md](CLAUDE.md)** - Complete reference guide with all commands
 - **[GOOGLE-OAUTH.md](GOOGLE-OAUTH.md)** - Step-by-step Google Drive setup (⭐ Start here for Drive)
+- **[docs/DAEMON.md](docs/DAEMON.md)** - Background daemon guide (automated ingestion)
 - **[PLAN-REMAINDER.md](PLAN-REMAINDER.md)** - Next implementation steps (Phase 2+)
 - **[DECISIONS.md](DECISIONS.md)** - Architecture decisions and rationale
 - **[HIGH-LEVEL-PLAN.md](HIGH-LEVEL-PLAN.md)** - Full project roadmap
