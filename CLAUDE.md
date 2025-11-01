@@ -344,6 +344,114 @@ python query.py "search for unique text from document" --top-k 1
 - Not loading → Check logs, verify OpenAI API key
 - Empty collection → Run ingestion first
 
+## Testing
+
+**IMPORTANT - Test Hygiene Rules:**
+1. ⚠️ **ALWAYS run tests before merging/committing changes**
+2. ⚠️ **NEVER skip, delete, or modify tests without explicit user approval**
+3. ⚠️ **NEVER mark tests as skipped without user approval**
+4. ⚠️ If tests fail, fix the code or ask the user for guidance
+
+Comprehensive test suite with 46+ tests covering all functionality. Tests are designed to catch real failures, not just run code.
+
+### Running Tests
+
+```bash
+# Activate environment first
+source .venv/bin/activate
+
+# Run all tests (recommended before commits)
+pytest tests/ --ignore=tests/e2e/
+
+# Fast unit tests only (<3s)
+pytest tests/unit/ -v
+
+# Integration tests (with real ChromaDB)
+pytest tests/integration/ -v
+
+# Specific test file
+pytest tests/unit/test_chunking.py -v
+
+# Specific test
+pytest tests/unit/test_chunking.py::test_chunk_size_respected -v
+
+# With coverage report
+pytest tests/ --ignore=tests/e2e/ --cov=src --cov-report=html
+# Open htmlcov/index.html
+
+# E2E tests (manual only, requires API keys, costs money)
+pytest tests/e2e/ -v
+```
+
+### Test Categories
+
+**Unit Tests** (41 tests, <3s total):
+- Fast execution with mocked external dependencies
+- Tests chunking, embeddings, models, ingestion pipeline
+- Tests local and Google Drive connectors
+- Covers real failure scenarios: permission errors, encoding issues, duplicate IDs
+
+**Integration Tests** (5 tests, ~1s total):
+- Real ChromaDB with isolated test collections
+- Mocked OpenAI APIs
+- Tests full ingestion workflow end-to-end
+- Tests incremental ingestion, metadata filtering, batch processing
+
+**E2E Tests** (optional, manual only):
+- Real OpenAI API (costs money)
+- Real Google Drive API
+- Run before releases only
+
+### Before Merging Changes
+
+**Pre-commit checklist:**
+```bash
+# 1. Run tests
+pytest tests/ --ignore=tests/e2e/
+
+# 2. Verify all pass (46 passed, 1 skipped expected)
+# 3. If any fail:
+#    - DO NOT skip the failing test
+#    - DO NOT delete the failing test
+#    - Fix the code or ask the user for guidance
+# 4. Only commit after all tests pass
+```
+
+### Test Modification Policy
+
+**Requires User Approval:**
+- Skipping tests (adding `@pytest.mark.skip`)
+- Deleting tests
+- Changing test assertions to make them pass
+- Reducing test coverage
+
+**Does NOT Require Approval:**
+- Adding new tests
+- Fixing broken test code (e.g., syntax errors)
+- Updating test fixtures with new fields
+
+**Rationale**: Tests are the safety net. Weakening them without oversight introduces regressions.
+
+### Real Failure Coverage
+
+Tests verify actual failure scenarios:
+- OpenAI API rejection of oversized chunks (test_chunking.py:15)
+- File permission denied (test_local.py:33)
+- Invalid file encodings (test_local.py:45)
+- Duplicate document IDs in ChromaDB (test_ingestion.py:10)
+- Memory issues with large documents (test_chunking.py:59)
+- Symlink cycles causing infinite recursion (test_local.py:39)
+- Metadata serialization for ChromaDB (test_models.py:28)
+
+### Test Statistics
+
+- **Total Tests**: 46 passing, 1 skipped
+- **Execution Time**: ~2.3 seconds (unit + integration)
+- **Code Coverage**: >80% for core modules
+- **Files**: 13 test files across unit/integration/e2e
+
+See `tests/README.md` for complete test documentation.
+
 ## Key Concepts
 
 **Chunking**: 512 tokens per chunk, 50 token overlap, recursive text splitting

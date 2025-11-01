@@ -297,11 +297,78 @@ Documents → Chunk (512 tokens) → Embed → Store (ChromaDB)
 
 ## Development
 
-### Run Tests
+### Running Tests
+
+**IMPORTANT**: Always run tests before merging changes. Never skip or delete tests without user approval.
 
 ```bash
-pytest tests/
+# Activate environment first
+source .venv/bin/activate
+
+# Run all tests (recommended before commits)
+pytest tests/ --ignore=tests/e2e/
+
+# Fast unit tests only (<3s)
+pytest tests/unit/ -v
+
+# Integration tests (with real ChromaDB)
+pytest tests/integration/ -v
+
+# Specific test file
+pytest tests/unit/test_chunking.py -v
+
+# With coverage report
+pytest tests/ --ignore=tests/e2e/ --cov=src --cov-report=html
+# Open htmlcov/index.html in browser
 ```
+
+**Test Suite Structure:**
+```
+tests/
+├── unit/                # Fast tests with mocked dependencies (41 tests, <3s)
+│   ├── test_chunking.py
+│   ├── test_embeddings.py
+│   ├── test_models.py
+│   ├── test_ingestion.py
+│   └── connectors/
+│       ├── test_local.py
+│       └── test_gdrive.py
+├── integration/         # Real ChromaDB tests (5 tests, ~1s)
+│   └── test_ingestion.py
+├── e2e/                 # Real API tests (manual only, costs money)
+└── conftest.py          # Shared fixtures
+```
+
+**Current Test Statistics:**
+- **46 passing, 1 skipped**
+- **Execution Time**: ~2.3 seconds (unit + integration)
+- **Code Coverage**: >80% for core modules
+
+**What Tests Cover:**
+- Document chunking with token limits and overlap
+- Embedding generation and batch processing
+- ChromaDB ingestion and retrieval workflows
+- Local file connector (permissions, encoding, symlinks)
+- Google Drive connector (OAuth, MIME types, file listing)
+- Real failure scenarios (not just happy paths)
+
+See **[tests/README.md](tests/README.md)** for complete test documentation.
+
+### Test Hygiene Rules
+
+**Before Committing:**
+1. Run `pytest tests/ --ignore=tests/e2e/`
+2. Verify all tests pass (46 passed, 1 skipped expected)
+3. If tests fail: fix the code or ask for guidance
+4. Never skip/delete tests without approval
+
+**Requires User Approval:**
+- Skipping tests (`@pytest.mark.skip`)
+- Deleting tests
+- Changing assertions to make tests pass
+- Reducing test coverage
+
+**Rationale**: Tests are the safety net preventing regressions.
 
 ### Code Style
 
