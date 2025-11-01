@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Personal RAG Daemon</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
+        h1 { color: #333; }
+        .status { padding: 15px; background: #e8f4f8; border-radius: 5px; margin: 10px 0; }
+        .status.running { background: #d4edda; }
+        .status.paused { background: #fff3cd; }
+        .config { padding: 15px; background: #f8f9fa; border-radius: 5px; margin: 10px 0; }
+        .history { margin-top: 20px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background: #f8f9fa; }
+        .success { color: green; }
+        .failure { color: red; }
+        button { padding: 8px 16px; margin: 5px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 4px; }
+        button:hover { background: #0056b3; }
+        select, input { padding: 8px; margin: 5px; border-radius: 4px; border: 1px solid #ddd; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Personal RAG - Background Ingestion Daemon</h1>
+
+        <div id="status" class="status">
+            <h2>Status</h2>
+            <p>Loading...</p>
+        </div>
+
+        <div class="config">
+            <h2>Configuration</h2>
+            <label>Interval:
+                <select id="interval">
+                    <option value="10">10 minutes</option>
+                    <option value="30">30 minutes</option>
+                    <option value="60">60 minutes</option>
+                </select>
+            </label>
+            <label>Mode:
+                <select id="mode">
+                    <option value="awake-only">Awake Only</option>
+                    <option value="plugged-in-only">Plugged In Only</option>
+                </select>
+            </label>
+            <button onclick="updateConfig()">Update Config</button>
+            <button onclick="triggerNow()">Trigger Now</button>
+            <button onclick="pauseScheduler()">Pause</button>
+            <button onclick="resumeScheduler()">Resume</button>
+        </div>
+
+        <div class="history">
+            <h2>Recent Runs</h2>
+            <table id="history-table">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Status</th>
+                        <th>Duration</th>
+                        <th>Processed</th>
+                        <th>Skipped</th>
+                        <th>Chunks</th>
+                        <th>Error</th>
+                    </tr>
+                </thead>
+                <tbody id="history-body">
+                    <tr><td colspan="7">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        async function loadStatus() {
+            const res = await fetch('/api/status');
+            const data = await res.json();
+
+            const statusDiv = document.getElementById('status');
+            statusDiv.className = 'status ' + data.scheduler_state;
+
+            let html = '<h2>Status</h2>';
+            html += `<p>State: <strong>${data.scheduler_state}</strong></p>`;
+            html += `<p>Interval: ${data.interval} minutes</p>`;
+            html += `<p>Mode: ${data.run_mode}</p>`;
+
+            if (data.last_run) {
+                html += `<p>Last Run: ${new Date(data.last_run.timestamp).toLocaleString()}</p>`;
+                html += `<p>Result: ${data.last_run.success ? 'Success' : 'Failed'}</p>`;
+                html += `<p>Processed: ${data.last_run.processed_docs}, Skipped: ${data.last_run.skipped_docs}</p>`;
+            }
+
+            statusDiv.innerHTML = html;
+
+            // Update config dropdowns
+            document.getElementById('interval').value = data.interval;
+            document.getElementById('mode').value = data.run_mode;
+        }
+
+        async function loadHistory() {
+            const res = await fetch('/api/history?limit=20');
+            const data = await res.json();
+
+            const tbody = document.getElementById('history-body');
+            tbody.innerHTML = '';
+
+            data.history.forEach(run => {
+                const row = tbody.insertRow();
+                row.innerHTML = `
+                    <td>${new Date(run.timestamp).toLocaleString()}</td>
+                    <td class="${run.success ? 'success' : 'failure'}">${run.success ? '✓' : '✗'}</td>
+                    <td>${run.duration.toFixed(2)}s</td>
+                    <td>${run.processed_docs || 0}</td>
+                    <td>${run.skipped_docs || 0}</td>
+                    <td>${run.total_chunks || 0}</td>
+                    <td>${run.error || ''}</td>
+                `;
+            });
+        }
+
+        async function updateConfig() {
+            const interval = parseInt(document.getElementById('interval').value);
+            const mode = document.getElementById('mode').value;
+
+            await fetch('/api/config', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({interval, run_mode: mode})
+            });
+
+            loadStatus();
+        }
+
+        async function triggerNow() {
+            await fetch('/api/trigger', {method: 'POST'});
+            alert('Ingestion triggered');
+            setTimeout(loadStatus, 1000);
+            setTimeout(loadHistory, 2000);
+        }
+
+        async function pauseScheduler() {
+            await fetch('/api/pause', {method: 'POST'});
+            loadStatus();
+        }
+
+        async function resumeScheduler() {
+            await fetch('/api/resume', {method: 'POST'});
+            loadStatus();
+        }
+
+        // Load data on page load
+        loadStatus();
+        loadHistory();
+
+        // Refresh every 10 seconds
+        setInterval(() => {
+            loadStatus();
+            loadHistory();
+        }, 10000);
+    </script>
+</body>
+</html>

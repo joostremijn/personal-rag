@@ -50,6 +50,9 @@ Examples:
   # Reset collection before ingesting
   python ingest.py --source ~/Documents/notes --source-type local --reset
 
+  # Force re-indexing of all documents (skip incremental optimization)
+  python ingest.py --source-type gdrive --mode=accessed --force-reindex
+
   # List Google Drive folders
   python ingest.py --source-type gdrive --list-folders
 
@@ -111,6 +114,12 @@ Examples:
         "--reset",
         action="store_true",
         help="Reset collection (delete all existing documents) before ingesting",
+    )
+
+    parser.add_argument(
+        "--force-reindex",
+        action="store_true",
+        help="Force re-indexing of all documents, even if unchanged (skips incremental optimization)",
     )
 
     parser.add_argument(
@@ -282,10 +291,15 @@ Examples:
             return 0
 
         # Ingest documents (using incremental method for better progress reporting and memory efficiency)
-        logger.info(f"Starting ingestion of {len(documents)} documents")
+        skip_unchanged = not args.force_reindex  # Only skip if not forcing reindex
+        if args.force_reindex:
+            logger.info(f"Force reindex enabled - will process all {len(documents)} documents")
+        else:
+            logger.info(f"Starting incremental ingestion of {len(documents)} documents")
+
         stats = pipeline.ingest_documents_incremental(
             documents,
-            skip_unchanged=True,  # Skip documents that haven't been modified
+            skip_unchanged=skip_unchanged,
             batch_size=5  # Process 5 documents at a time (more frequent updates)
         )
 
