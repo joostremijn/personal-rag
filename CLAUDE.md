@@ -35,7 +35,73 @@ streamlit run app.py
 # Start API (optional)
 python api.py
 # API at http://localhost:8000
+
+# Background daemon (automatic ingestion)
+python daemon.py
+# Dashboard at http://localhost:8001
 ```
+
+## Background Daemon (Automatic Ingestion)
+
+The daemon automatically ingests documents from Google Drive at regular intervals.
+
+### Quick Start
+
+```bash
+# Start the daemon
+python daemon.py
+
+# Access web dashboard
+open http://localhost:8001
+
+# Or use CLI to control
+python daemon_cli.py status
+python daemon_cli.py config --interval 30
+python daemon_cli.py trigger
+```
+
+### Features
+
+- **Scheduled ingestion**: Runs every 10, 30, or 60 minutes (configurable)
+- **Conditional execution**: Only run when Mac is awake or plugged in
+- **Web dashboard**: Monitor status, view history, control settings
+- **CLI tool**: Command-line control (status, trigger, config, history)
+- **macOS notifications**: Alerts on ingestion failures
+- **State persistence**: Configuration and history stored in SQLite
+
+### Common Commands
+
+```bash
+# View status
+python daemon_cli.py status
+
+# Change settings
+python daemon_cli.py config --interval 30 --mode plugged-in-only
+
+# Manual trigger
+python daemon_cli.py trigger
+
+# View history
+python daemon_cli.py history --limit 10
+
+# Pause/resume
+python daemon_cli.py pause
+python daemon_cli.py resume
+```
+
+### Run Modes
+
+- **awake-only** (default): Run whenever Mac is awake
+- **plugged-in-only**: Only run when plugged into AC power
+
+### Configuration
+
+Via dashboard (`http://localhost:8001`):
+- Interval: 10, 30, or 60 minutes
+- Mode: awake-only or plugged-in-only
+- Max results: Number of documents to fetch per run
+
+**See [docs/DAEMON.md](docs/DAEMON.md) for complete documentation.**
 
 ## Architecture
 
@@ -56,15 +122,24 @@ src/
 ├── embeddings.py      # OpenAI embeddings
 ├── ingestion.py       # Pipeline: chunk → embed → store
 ├── retrieval.py       # Query ChromaDB
-└── connectors/
-    ├── base.py        # Abstract connector
-    ├── local.py       # Local files (.txt, .md, .pdf, .docx)
-    └── gdrive.py      # Google Drive
+├── connectors/
+│   ├── base.py        # Abstract connector
+│   ├── local.py       # Local files (.txt, .md, .pdf, .docx)
+│   └── gdrive.py      # Google Drive
+└── daemon/
+    ├── state.py       # SQLite state persistence
+    ├── scheduler.py   # APScheduler job scheduling
+    ├── runner.py      # Ingestion execution wrapper
+    ├── conditions.py  # macOS system conditions
+    └── notifications.py # macOS notifications
 
 ingest.py              # CLI tool for ingestion
 query.py               # CLI tool for querying
 api.py                 # FastAPI backend
 app.py                 # Streamlit UI
+daemon.py              # Background daemon orchestrator
+daemon_web.py          # Daemon web dashboard
+daemon_cli.py          # Daemon CLI tool
 ```
 
 ## Configuration (.env)
