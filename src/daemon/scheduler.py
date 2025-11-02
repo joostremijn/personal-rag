@@ -7,7 +7,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 from src.daemon.state import DaemonState
-from src.daemon.runner import IngestionRunner
+from src.daemon.runner import MultiSourceIngestionRunner
+from src.daemon.models import Source
 from src.daemon.conditions import should_run
 from src.daemon.notifications import send_notification
 
@@ -104,10 +105,17 @@ class DaemonScheduler:
 
     def _execute_ingestion(self) -> None:
         """Execute the ingestion run."""
-        max_results = int(self.state.get_config("max_results") or "100")
+        # Load enabled sources
+        sources_data = self.state.get_sources(enabled_only=True)
+        sources = [Source.from_dict(s) for s in sources_data]
 
-        runner = IngestionRunner(max_results=max_results)
-        result = runner.run_ingestion()
+        if not sources:
+            logger.warning("No enabled sources configured")
+            return
+
+        # Run multi-source ingestion
+        runner = MultiSourceIngestionRunner(time_budget=600)  # 10 minutes
+        result = runner.run_ingestion(sources)
 
         # Record result
         self.state.record_run(result)
@@ -118,6 +126,9 @@ class DaemonScheduler:
                 f"Ingestion successful: {result.processed_docs} processed, "
                 f"{result.skipped_docs} skipped in {result.duration:.2f}s"
             )
+            if result.source_breakdown:
+                for source_name, stats in result.source_breakdown.items():
+                    logger.info(f"  {source_name}: {stats['processed']} processed, {stats['skipped']} skipped")
         else:
             logger.error(f"Ingestion failed: {result.error}")
             # Send notification on failure
