@@ -4,11 +4,12 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, HTTPException, Form
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
 from src.daemon.state import DaemonState
+from src.daemon.oauth import OAuthManager
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,9 @@ def init_app(state: DaemonState, scheduler) -> FastAPI:
     global _state, _scheduler
     _state = state
     _scheduler = scheduler
+
+    # Initialize OAuth manager
+    oauth_manager = OAuthManager()
 
     app = FastAPI(title="Personal RAG Daemon")
 
@@ -122,5 +126,53 @@ def init_app(state: DaemonState, scheduler) -> FastAPI:
             all_lines = f.readlines()
             recent_lines = all_lines[-lines:]
             return {"logs": recent_lines}
+
+    @app.get("/api/oauth/status")
+    async def oauth_status():
+        """Get OAuth authentication status."""
+        return oauth_manager.get_status()
+
+    @app.get("/api/oauth/authorize")
+    async def oauth_authorize():
+        """Start OAuth flow."""
+        try:
+            auth_url = oauth_manager.get_authorization_url()
+            # Return HTML page with instructions
+            html_content = f"""
+            <!DOCTYPE html>
+            <html>
+            <head><title>Google Drive Authorization</title></head>
+            <body style="font-family: sans-serif; max-width: 600px; margin: 50px auto;">
+                <h2>Authorize Google Drive Access</h2>
+                <p>Click the button below to authorize Personal RAG to access your Google Drive:</p>
+                <p><a href="{auth_url}" target="_blank" style="display: inline-block; background: #4285f4; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px;">Authorize Google Drive</a></p>
+                <p style="margin-top: 30px; color: #666;">After authorizing, copy the code and paste it below:</p>
+                <form action="/api/oauth/callback" method="post" style="margin-top: 20px;">
+                    <input type="text" name="code" placeholder="Paste authorization code here" style="width: 100%; padding: 10px; font-size: 14px;" required>
+                    <button type="submit" style="margin-top: 10px; background: #34a853; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer;">Complete Authorization</button>
+                </form>
+            </body>
+            </html>
+            """
+            return HTMLResponse(content=html_content)
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+
+    @app.post("/api/oauth/callback")
+    async def oauth_callback(code: str = Form(...)):
+        """Handle OAuth callback."""
+        result = oauth_manager.exchange_code(code)
+
+        if result["success"]:
+            # Redirect to dashboard with success message
+            return RedirectResponse(url="/?oauth=success", status_code=303)
+        else:
+            raise HTTPException(status_code=400, detail=result.get("error"))
+
+    @app.post("/api/oauth/disconnect")
+    async def oauth_disconnect():
+        """Disconnect Google Drive."""
+        oauth_manager.disconnect()
+        return {"success": True}
 
     return app
