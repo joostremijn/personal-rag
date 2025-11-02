@@ -6,6 +6,10 @@
         body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
         .container { max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
         h1 { color: #333; }
+        .section { padding: 15px; background: #f8f9fa; border-radius: 5px; margin: 15px 0; }
+        .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+        .section-header h2 { margin: 0; }
+        .section-content { margin-top: 10px; }
         .status { padding: 15px; background: #e8f4f8; border-radius: 5px; margin: 10px 0; }
         .status.running { background: #d4edda; }
         .status.paused { background: #fff3cd; }
@@ -16,14 +20,51 @@
         th { background: #f8f9fa; }
         .success { color: green; }
         .failure { color: red; }
-        button { padding: 8px 16px; margin: 5px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 4px; }
-        button:hover { background: #0056b3; }
+        .btn { padding: 8px 16px; margin: 5px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 4px; text-decoration: none; display: inline-block; }
+        .btn:hover { background: #0056b3; }
+        .btn-primary { background: #007bff; }
+        .btn-primary:hover { background: #0056b3; }
         select, input { padding: 8px; margin: 5px; border-radius: 4px; border: 1px solid #ddd; }
+
+        /* Modal styles */
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); }
+        .modal-content { background-color: #fff; margin: 50px auto; padding: 0; border-radius: 8px; width: 90%; max-width: 600px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+        .modal-header { padding: 20px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
+        .modal-header h3 { margin: 0; }
+        .modal-body { padding: 20px; }
+        .modal-footer { padding: 15px 20px; border-top: 1px solid #eee; text-align: right; }
+        .close { font-size: 28px; font-weight: bold; color: #aaa; cursor: pointer; }
+        .close:hover { color: #000; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; font-weight: 500; }
+        .form-group input[type="text"], .form-group input[type="number"], .form-group select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
+        .type-settings { margin-top: 15px; padding: 15px; background: #f9f9f9; border-radius: 4px; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>Personal RAG - Background Ingestion Daemon</h1>
+
+        <!-- OAuth Status -->
+        <div class="section" id="oauth-section">
+            <div class="section-header">
+                <h2>Google Drive Connection</h2>
+            </div>
+            <div class="section-content">
+                <div id="oauth-status">Loading...</div>
+            </div>
+        </div>
+
+        <!-- Sources Section -->
+        <div class="section" id="sources-section">
+            <div class="section-header">
+                <h2>Sources</h2>
+                <button class="btn btn-primary" onclick="showAddSourceModal()">+ Add Source</button>
+            </div>
+            <div class="section-content">
+                <div id="sources-list">Loading...</div>
+            </div>
+        </div>
 
         <div id="status" class="status">
             <h2>Status</h2>
@@ -45,10 +86,10 @@
                     <option value="plugged-in-only">Plugged In Only</option>
                 </select>
             </label>
-            <button onclick="updateConfig()">Update Config</button>
-            <button onclick="triggerNow()">Trigger Now</button>
-            <button onclick="pauseScheduler()">Pause</button>
-            <button onclick="resumeScheduler()">Resume</button>
+            <button class="btn" onclick="updateConfig()">Update Config</button>
+            <button class="btn" onclick="triggerNow()">Trigger Now</button>
+            <button class="btn" onclick="pauseScheduler()">Pause</button>
+            <button class="btn" onclick="resumeScheduler()">Resume</button>
         </div>
 
         <div class="history">
@@ -72,7 +113,257 @@
         </div>
     </div>
 
+    <!-- Add Source Modal -->
+    <div id="source-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modal-title">Add Source</h3>
+                <span class="close" onclick="closeSourceModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <form id="source-form">
+                    <input type="hidden" id="source-id">
+
+                    <div class="form-group">
+                        <label for="source-name">Name</label>
+                        <input type="text" id="source-name" required placeholder="e.g., Work Drive">
+                    </div>
+
+                    <div class="form-group">
+                        <label>Type</label>
+                        <div>
+                            <input type="radio" id="type-gdrive" name="source-type" value="gdrive" checked>
+                            <label for="type-gdrive">Google Drive</label>
+                            <input type="radio" id="type-local" name="source-type" value="local">
+                            <label for="type-local">Local Directory</label>
+                        </div>
+                    </div>
+
+                    <div id="gdrive-settings" class="type-settings">
+                        <div class="form-group">
+                            <label for="folder-id">Folder ID (leave empty for all files)</label>
+                            <input type="text" id="folder-id" placeholder="Optional">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="ingestion-mode">Mode</label>
+                            <select id="ingestion-mode">
+                                <option value="accessed">Recently Accessed</option>
+                                <option value="drive">All Drive Files</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="days-back">Time Range (months)</label>
+                            <input type="number" id="days-back" value="24" min="1">
+                        </div>
+                    </div>
+
+                    <div id="local-settings" class="type-settings" style="display:none;">
+                        <div class="form-group">
+                            <label for="local-path">Directory Path</label>
+                            <input type="text" id="local-path" placeholder="/Users/name/Documents">
+                        </div>
+
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="recursive" checked>
+                                Scan subdirectories recursively
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="enabled" checked>
+                            Enabled
+                        </label>
+                    </div>
+
+                    <div class="modal-footer">
+                        <button type="button" class="btn" onclick="closeSourceModal()">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Save</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <script>
+        // OAuth Status
+        async function loadOAuthStatus() {
+            const response = await fetch('/api/oauth/status');
+            const data = await response.json();
+
+            const statusDiv = document.getElementById('oauth-status');
+            if (data.authenticated) {
+                statusDiv.innerHTML = `
+                    <div style="color: #2d5;">
+                        ✓ Connected: ${data.email}
+                        <button class="btn" onclick="disconnectOAuth()" style="margin-left: 10px;">Disconnect</button>
+                    </div>
+                `;
+            } else {
+                statusDiv.innerHTML = `
+                    <div style="color: #d52;">
+                        Not connected
+                        <a href="/api/oauth/authorize" class="btn btn-primary" style="margin-left: 10px;">Connect Google Drive</a>
+                    </div>
+                `;
+            }
+        }
+
+        async function disconnectOAuth() {
+            if (confirm('Disconnect Google Drive? You will need to re-authorize.')) {
+                await fetch('/api/oauth/disconnect', { method: 'POST' });
+                loadOAuthStatus();
+                loadSources();
+            }
+        }
+
+        // Sources Management
+        async function loadSources() {
+            const response = await fetch('/api/sources');
+            const data = await response.json();
+
+            const listDiv = document.getElementById('sources-list');
+
+            if (data.sources.length === 0) {
+                listDiv.innerHTML = '<p style="color: #666;">No sources configured. Click "Add Source" to get started.</p>';
+                return;
+            }
+
+            listDiv.innerHTML = data.sources.map(source => `
+                <div class="source-item" style="border: 1px solid #ddd; padding: 15px; margin-bottom: 10px; border-radius: 4px;">
+                    <div style="display: flex; justify-content: space-between; align-items: start;">
+                        <div>
+                            <h4 style="margin: 0 0 5px 0;">
+                                <input type="checkbox" ${source.enabled ? 'checked' : ''}
+                                       onchange="toggleSource(${source.id})"
+                                       style="margin-right: 8px;">
+                                ${source.name}
+                                <span style="color: #666; font-size: 0.9em;">(${source.source_type})</span>
+                            </h4>
+                            <div style="color: #666; font-size: 0.9em;">
+                                ${getSourceSummary(source)}
+                            </div>
+                        </div>
+                        <div>
+                            <button class="btn" onclick="editSource(${source.id})">Edit</button>
+                            <button class="btn" onclick="deleteSource(${source.id})" style="background: #d52; color: white;">Delete</button>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function getSourceSummary(source) {
+            if (source.source_type === 'gdrive') {
+                const mode = source.ingestion_mode === 'accessed' ? 'Recently accessed' : 'All files';
+                const months = Math.round(source.days_back / 30);
+                return `${mode}, last ${months} months${source.folder_id ? ', folder: ' + source.folder_id : ''}`;
+            } else {
+                return `${source.local_path}${source.recursive ? ', recursive' : ''}`;
+            }
+        }
+
+        async function toggleSource(sourceId) {
+            await fetch(`/api/sources/${sourceId}/toggle`, { method: 'POST' });
+            loadSources();
+        }
+
+        async function deleteSource(sourceId) {
+            if (confirm('Delete this source? This cannot be undone.')) {
+                await fetch(`/api/sources/${sourceId}`, { method: 'DELETE' });
+                loadSources();
+            }
+        }
+
+        function showAddSourceModal() {
+            document.getElementById('modal-title').textContent = 'Add Source';
+            document.getElementById('source-form').reset();
+            document.getElementById('source-id').value = '';
+            document.getElementById('source-modal').style.display = 'block';
+            updateTypeSettings();
+        }
+
+        async function editSource(sourceId) {
+            const response = await fetch(`/api/sources/${sourceId}`);
+            const source = await response.json();
+
+            document.getElementById('modal-title').textContent = 'Edit Source';
+            document.getElementById('source-id').value = source.id;
+            document.getElementById('source-name').value = source.name;
+            document.querySelector(`input[name="source-type"][value="${source.source_type}"]`).checked = true;
+            document.getElementById('enabled').checked = source.enabled;
+
+            if (source.source_type === 'gdrive') {
+                document.getElementById('folder-id').value = source.folder_id || '';
+                document.getElementById('ingestion-mode').value = source.ingestion_mode;
+                document.getElementById('days-back').value = Math.round(source.days_back / 30);
+            } else {
+                document.getElementById('local-path').value = source.local_path || '';
+                document.getElementById('recursive').checked = source.recursive;
+            }
+
+            updateTypeSettings();
+            document.getElementById('source-modal').style.display = 'block';
+        }
+
+        function closeSourceModal() {
+            document.getElementById('source-modal').style.display = 'none';
+        }
+
+        function updateTypeSettings() {
+            const type = document.querySelector('input[name="source-type"]:checked').value;
+            document.getElementById('gdrive-settings').style.display = type === 'gdrive' ? 'block' : 'none';
+            document.getElementById('local-settings').style.display = type === 'local' ? 'block' : 'none';
+        }
+
+        document.querySelectorAll('input[name="source-type"]').forEach(radio => {
+            radio.addEventListener('change', updateTypeSettings);
+        });
+
+        document.getElementById('source-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const sourceId = document.getElementById('source-id').value;
+            const type = document.querySelector('input[name="source-type"]:checked').value;
+
+            const data = {
+                name: document.getElementById('source-name').value,
+                source_type: type,
+                enabled: document.getElementById('enabled').checked
+            };
+
+            if (type === 'gdrive') {
+                data.folder_id = document.getElementById('folder-id').value || null;
+                data.ingestion_mode = document.getElementById('ingestion-mode').value;
+                data.days_back = parseInt(document.getElementById('days-back').value) * 30;
+            } else {
+                data.local_path = document.getElementById('local-path').value;
+                data.recursive = document.getElementById('recursive').checked;
+            }
+
+            const url = sourceId ? `/api/sources/${sourceId}` : '/api/sources';
+            const method = sourceId ? 'PUT' : 'POST';
+
+            const response = await fetch(url, {
+                method: method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+
+            if (response.ok) {
+                closeSourceModal();
+                loadSources();
+            } else {
+                const error = await response.json();
+                alert('Error: ' + (error.detail || 'Failed to save source'));
+            }
+        });
+
+        // Original dashboard functions
         async function loadStatus() {
             const res = await fetch('/api/status');
             const data = await res.json();
@@ -149,12 +440,16 @@
             loadStatus();
         }
 
-        // Load data on page load
+        // Initialize
+        loadOAuthStatus();
+        loadSources();
         loadStatus();
         loadHistory();
 
         // Refresh every 10 seconds
         setInterval(() => {
+            loadOAuthStatus();
+            loadSources();
             loadStatus();
             loadHistory();
         }, 10000);
