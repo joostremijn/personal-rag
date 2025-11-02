@@ -3,6 +3,7 @@
 from unittest.mock import patch, MagicMock
 from src.daemon.runner import IngestionRunner
 from src.models import IngestionStats
+from src.daemon.models import Source, SourceType
 
 
 @patch('src.daemon.runner.GoogleDriveConnector')
@@ -48,3 +49,51 @@ def test_run_ingestion_failure(mock_connector):
     assert result.success is False
     assert result.error is not None
     assert "Network error" in result.error
+
+
+def test_run_multi_source_ingestion(tmp_path, monkeypatch):
+    """Test running ingestion with multiple sources."""
+    from src.daemon.runner import MultiSourceIngestionRunner
+
+    # Mock sources
+    sources = [
+        Source(
+            id=1,
+            name="Test Drive",
+            source_type=SourceType.GDRIVE,
+            enabled=True,
+            folder_id=None,
+            ingestion_mode="accessed",
+            days_back=730
+        ),
+        Source(
+            id=2,
+            name="Test Local",
+            source_type=SourceType.LOCAL,
+            enabled=True,
+            local_path=str(tmp_path / "docs"),
+            recursive=True
+        )
+    ]
+
+    # Create test directory
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "test.txt").write_text("Test content")
+
+    # Mock ingestion pipeline
+    class MockPipeline:
+        def ingest_documents(self, docs):
+            return len(docs), 0, len(docs) * 3
+
+    monkeypatch.setattr(
+        "src.daemon.runner.IngestionPipeline",
+        lambda: MockPipeline()
+    )
+
+    runner = MultiSourceIngestionRunner(time_budget=60)
+    result = runner.run_ingestion(sources)
+
+    assert result.success is True
+    assert result.source_breakdown is not None
+    assert "Test Drive" in result.source_breakdown
+    assert "Test Local" in result.source_breakdown
