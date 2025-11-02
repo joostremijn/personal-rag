@@ -175,4 +175,58 @@ def init_app(state: DaemonState, scheduler) -> FastAPI:
         oauth_manager.disconnect()
         return {"success": True}
 
+    @app.get("/api/sources")
+    async def list_sources():
+        """List all sources."""
+        sources = _state.get_sources()
+        return {"sources": sources}
+
+    @app.post("/api/sources")
+    async def create_source(source: Dict[str, Any]):
+        """Create a new source."""
+        try:
+            source_id = _state.create_source(source)
+            return {"success": True, "id": source_id}
+        except Exception as e:
+            logger.error(f"Failed to create source: {e}")
+            raise HTTPException(status_code=400, detail=str(e))
+
+    @app.get("/api/sources/{source_id}")
+    async def get_source(source_id: int):
+        """Get a single source."""
+        source = _state.get_source(source_id)
+        if source:
+            return source
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    @app.put("/api/sources/{source_id}")
+    async def update_source(source_id: int, data: Dict[str, Any]):
+        """Update a source."""
+        try:
+            _state.update_source(source_id, data)
+            return {"success": True}
+        except Exception as e:
+            logger.error(f"Failed to update source: {e}")
+            raise HTTPException(status_code=400, detail=str(e))
+
+    @app.delete("/api/sources/{source_id}")
+    async def delete_source(source_id: int):
+        """Delete a source."""
+        try:
+            _state.delete_source(source_id)
+            return {"success": True}
+        except Exception as e:
+            logger.error(f"Failed to delete source: {e}")
+            raise HTTPException(status_code=400, detail=str(e))
+
+    @app.post("/api/sources/{source_id}/toggle")
+    async def toggle_source(source_id: int):
+        """Toggle source enabled status."""
+        source = _state.get_source(source_id)
+        if not source:
+            raise HTTPException(status_code=404, detail="Source not found")
+
+        _state.update_source(source_id, {"enabled": not source["enabled"]})
+        return {"success": True, "enabled": not source["enabled"]}
+
     return app
