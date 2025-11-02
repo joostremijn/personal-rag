@@ -323,7 +323,29 @@ The dashboard shows:
 - **Last Run**: Success/failure, documents processed
 - **History**: Last 20 ingestion runs
 
-### 6.4 Configure the Daemon
+### 6.4 Configure Sources
+
+The daemon can watch multiple sources:
+
+**Add Google Drive folder:**
+1. Open `http://localhost:8001`
+2. Connect Google Drive (if not already)
+3. Click "+ Add Source"
+4. Name it (e.g., "Work Drive")
+5. Select Google Drive
+6. Configure folder and time range
+7. Save
+
+**Add local directory:**
+1. Click "+ Add Source"
+2. Name it (e.g., "Personal Notes")
+3. Select Local Directory
+4. Enter path: `/Users/yourname/Documents/notes`
+5. Save
+
+The daemon will process all enabled sources each run, prioritizing Google Drive.
+
+### 6.5 Configure the Daemon
 
 **Via Dashboard:**
 - Click on interval/mode dropdowns
@@ -341,7 +363,7 @@ python daemon_cli.py config --mode plugged-in-only
 python daemon_cli.py status
 ```
 
-### 6.5 Recommended Settings
+### 6.6 Recommended Settings
 
 **For most users:**
 - Interval: 60 minutes

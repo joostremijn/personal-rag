@@ -57,6 +57,49 @@ python daemon_cli.py pause
 python daemon_cli.py resume
 ```
 
+## Managing Sources
+
+Sources are configured locations where the daemon will fetch documents.
+
+### Adding a Google Drive Source
+
+1. **Connect Google Drive** (first time only):
+   - Open dashboard: `http://localhost:8001`
+   - Click "Connect Google Drive"
+   - Authorize in browser
+   - Copy and paste authorization code
+
+2. **Add Source**:
+   - Click "+ Add Source"
+   - Enter name (e.g., "Work Documents")
+   - Select "Google Drive"
+   - Configure:
+     - **Folder ID**: Leave empty for all files, or enter specific folder ID
+     - **Mode**: Recently Accessed (recommended) or All Files
+     - **Time Range**: 24 months (default)
+   - Click "Save"
+
+### Adding a Local Directory Source
+
+1. **Add Source**:
+   - Click "+ Add Source"
+   - Enter name (e.g., "Personal Notes")
+   - Select "Local Directory"
+   - Configure:
+     - **Path**: Absolute path to directory (e.g., `/Users/name/Documents/notes`)
+     - **Recursive**: Check to include subdirectories
+   - Click "Save"
+
+### Managing Sources
+
+- **Enable/Disable**: Click checkbox next to source name
+- **Edit**: Click "Edit" button
+- **Delete**: Click "Delete" button (requires confirmation)
+
+### Source Priority
+
+Google Drive sources are processed first, then local sources. Within each type, sources are processed in creation order.
+
 ## Configuration
 
 ### Intervals
