@@ -56,6 +56,26 @@ class DaemonState:
                 )
             """)
 
+            # Sources table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS sources (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    source_type TEXT NOT NULL,
+                    enabled BOOLEAN DEFAULT 1,
+
+                    folder_id TEXT,
+                    ingestion_mode TEXT DEFAULT 'accessed',
+                    days_back INTEGER DEFAULT 730,
+
+                    local_path TEXT,
+                    recursive BOOLEAN DEFAULT 1,
+
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
             # Set default config if not exists
             defaults = {
                 "interval": "60",

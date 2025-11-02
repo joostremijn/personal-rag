@@ -51,3 +51,16 @@ def test_record_run():
         assert len(history) == 1
         assert history[0]["success"] == 1  # SQLite stores boolean as integer
         assert history[0]["duration"] == 2.5
+
+
+def test_sources_table_exists(tmp_path):
+    """Test that sources table is created on init."""
+    db_path = tmp_path / "test.db"
+    state = DaemonState(db_path)
+
+    import sqlite3
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='sources'"
+        )
+        assert cursor.fetchone() is not None
