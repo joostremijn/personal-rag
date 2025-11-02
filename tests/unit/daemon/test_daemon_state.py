@@ -137,3 +137,36 @@ def test_delete_source(tmp_path):
 
     sources = state.get_sources()
     assert len(sources) == 0
+
+
+def test_record_run_with_source_breakdown(tmp_path):
+    """Test recording run with per-source breakdown."""
+    from src.daemon.state import RunResult
+    from datetime import datetime
+
+    db_path = tmp_path / "test.db"
+    state = DaemonState(db_path)
+
+    result = RunResult(
+        success=True,
+        duration=120.5,
+        processed_docs=45,
+        skipped_docs=200,
+        total_chunks=150,
+        error=None,
+        timestamp=datetime.now(),
+        source_breakdown={
+            "Work Drive": {"processed": 30, "skipped": 150},
+            "Personal Notes": {"processed": 15, "skipped": 50}
+        }
+    )
+
+    state.record_run(result)
+
+    history = state.get_history(limit=1)
+    assert len(history) == 1
+
+    import json
+    breakdown = json.loads(history[0]["source_breakdown"])
+    assert breakdown["Work Drive"]["processed"] == 30
+    assert breakdown["Personal Notes"]["skipped"] == 50

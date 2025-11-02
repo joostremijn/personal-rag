@@ -17,6 +17,7 @@ class RunResult:
     total_chunks: int
     error: Optional[str]
     timestamp: datetime
+    source_breakdown: Optional[Dict[str, Dict[str, int]]] = None
 
 
 class DaemonState:
@@ -52,6 +53,7 @@ class DaemonState:
                     skipped_docs INTEGER,
                     total_chunks INTEGER,
                     error TEXT,
+                    source_breakdown TEXT,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             """)
@@ -129,12 +131,18 @@ class DaemonState:
         Args:
             result: Run result to record
         """
+        import json
+
+        source_breakdown_json = None
+        if result.source_breakdown:
+            source_breakdown_json = json.dumps(result.source_breakdown)
+
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
                 """
                 INSERT INTO run_history
-                (timestamp, success, duration, processed_docs, skipped_docs, total_chunks, error)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                (timestamp, success, duration, processed_docs, skipped_docs, total_chunks, error, source_breakdown)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     result.timestamp.isoformat(),
@@ -144,6 +152,7 @@ class DaemonState:
                     result.skipped_docs,
                     result.total_chunks,
                     result.error,
+                    source_breakdown_json,
                 )
             )
             conn.commit()
