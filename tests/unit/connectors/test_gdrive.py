@@ -2,6 +2,7 @@
 
 from unittest.mock import patch, MagicMock, Mock
 from datetime import datetime, timedelta
+import json
 import pytest
 
 from src.connectors.gdrive import GoogleDriveConnector
@@ -103,3 +104,36 @@ def test_source_type_is_gdrive():
     """Connector should use GDRIVE source type."""
     connector = GoogleDriveConnector()
     assert connector.source_type == SourceType.GDRIVE
+
+
+def test_authenticate_loads_json_token_file(tmp_path, mock_gdrive_service, mock_drive_credentials):
+    """GoogleDriveConnector should load JSON token files (saved by OAuthManager)."""
+    # Create JSON token file (format saved by OAuthManager)
+    token_file = tmp_path / "token.json"
+    token_data = {
+        "token": "ya29.fake_token",
+        "refresh_token": "fake_refresh_token",
+        "token_uri": "https://oauth2.googleapis.com/token",
+        "client_id": "fake_client_id",
+        "client_secret": "fake_client_secret",
+        "scopes": ["https://www.googleapis.com/auth/drive.readonly"]
+    }
+    with open(token_file, 'w') as f:
+        json.dump(token_data, f)
+
+    credentials_file = tmp_path / "credentials.json"
+    credentials_file.write_text('{"installed": {}}')
+
+    # Mock settings to use our temp files
+    with patch("src.connectors.gdrive.get_settings") as mock_settings:
+        mock_settings.return_value.google_token_path = token_file
+        mock_settings.return_value.google_credentials_path = credentials_file
+
+        with patch("src.connectors.gdrive.Credentials.from_authorized_user_file", return_value=mock_drive_credentials):
+            with patch("src.connectors.gdrive.build", return_value=mock_gdrive_service):
+                connector = GoogleDriveConnector()
+                connector._authenticate()
+
+                # Should successfully authenticate using JSON token
+                assert connector.service is not None
+                assert connector.creds is not None

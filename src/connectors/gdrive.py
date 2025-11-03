@@ -1,6 +1,7 @@
 """Google Drive connector for ingesting documents."""
 
 import io
+import json
 import logging
 import os
 import pickle
@@ -77,12 +78,21 @@ class GoogleDriveConnector(BaseConnector):
 
         # Load existing token if available
         if token_file.exists():
+            # Try JSON format first (new format, saved by OAuthManager)
             try:
-                with open(token_file, "rb") as token:
-                    creds = pickle.load(token)
-                logger.info("Loaded existing Google Drive credentials")
-            except Exception as e:
-                logger.warning(f"Could not load token file: {e}")
+                creds = Credentials.from_authorized_user_file(
+                    str(token_file),
+                    self.SCOPES
+                )
+                logger.info("Loaded existing Google Drive credentials (JSON format)")
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                # Try pickle format (legacy format)
+                try:
+                    with open(token_file, "rb") as token:
+                        creds = pickle.load(token)
+                    logger.info("Loaded existing Google Drive credentials (pickle format)")
+                except Exception as e:
+                    logger.warning(f"Could not load token file: {e}")
 
         # Refresh or create new credentials if needed
         if not creds or not creds.valid:
