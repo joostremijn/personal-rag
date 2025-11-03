@@ -99,3 +99,49 @@ def test_embeddings_are_deterministic(mock_openai_embeddings):
 
         assert result1[0].embedding == result2[0].embedding, \
             "Same text should produce same embedding"
+
+
+def test_embed_chunks_batches_large_inputs(mock_openai_embeddings):
+    """Large numbers of chunks should be batched to stay under token limit."""
+    # Create chunks that exceed the 300k token limit when combined
+    # Each chunk has ~1500 tokens (6000 chars ÷ 4)
+    large_text = "word " * 1500  # ~1500 tokens per chunk
+
+    # Create 500 chunks = ~750k tokens total (will need ~3 batches)
+    chunks = [
+        DocumentChunk(
+            content=large_text,
+            metadata=ChunkMetadata(
+                source=f"/test{i}.txt",
+                source_type=SourceType.LOCAL,
+                chunk_index=0,
+                total_chunks=1,
+            )
+        )
+        for i in range(500)
+    ]
+
+    with patch("src.embeddings.OpenAIEmbeddings", return_value=mock_openai_embeddings):
+        service = EmbeddingService()
+
+        # Track how many times embed_documents was called
+        original_method = service.embeddings.embed_documents
+        call_count = 0
+
+        def count_calls(texts):
+            nonlocal call_count
+            call_count += 1
+            # Return embeddings for the batch
+            return [[0.1] * 1536 for _ in texts]
+
+        service.embeddings.embed_documents = count_calls
+
+        result = service.embed_chunks(chunks)
+
+        # Should have embedded all chunks
+        assert len(result) == 500
+        assert all(chunk.embedding is not None for chunk in result)
+
+        # Should have been batched (multiple API calls)
+        assert call_count > 1, f"Expected batching but only made {call_count} call(s)"
+        print(f"Made {call_count} batched API calls for 500 large chunks")
