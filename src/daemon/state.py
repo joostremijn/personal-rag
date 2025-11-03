@@ -200,6 +200,33 @@ class DaemonState:
         history = self.get_history(limit=1)
         return history[0] if history else None
 
+    def set_active_run(self, status: str) -> None:
+        """Set active run status (for in-progress runs).
+
+        Args:
+            status: Status message (e.g., "Fetching documents...", "Processing 10/100")
+        """
+        self.set_config("active_run_status", status)
+        self.set_config("active_run_start", datetime.now().isoformat())
+
+    def get_active_run(self) -> Optional[Dict[str, str]]:
+        """Get active run status if one is in progress.
+
+        Returns:
+            Dict with status and start_time, or None if no active run
+        """
+        status = self.get_config("active_run_status")
+        if status:
+            start_time = self.get_config("active_run_start")
+            return {"status": status, "start_time": start_time}
+        return None
+
+    def clear_active_run(self) -> None:
+        """Clear active run status (when run completes)."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("DELETE FROM config WHERE key IN ('active_run_status', 'active_run_start')")
+            conn.commit()
+
     def create_source(self, data: Dict[str, Any]) -> int:
         """Create a new source.
 

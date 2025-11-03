@@ -224,38 +224,12 @@ class GoogleDriveConnector(BaseConnector):
 
             logger.info(f"Found {len(files)} files in Google Drive")
 
-            # Fetch documents
-            documents = []
-            skipped_count = 0
-            for file_info in files:
-                # Check if we should skip this file before downloading content
-                skip_download = False
-                if should_skip_callback and not metadata_only:
-                    # Extract metadata for skip check
-                    file_id = file_info["id"]
-                    file_name = file_info["name"]
-                    modified_at = datetime.fromisoformat(
-                        file_info["modifiedTime"].replace("Z", "+00:00")
-                    )
-
-                    # Call the callback to check if we should skip
-                    if should_skip_callback(file_id, modified_at, file_name):
-                        logger.debug(f"Skipping download for unchanged file: {file_name}")
-                        skipped_count += 1
-                        continue
-
-                doc = self._fetch_file(file_info, metadata_only=metadata_only)
-                if doc:
-                    documents.append(doc)
-
-            if skipped_count > 0:
-                logger.info(f"Skipped downloading {skipped_count} unchanged files")
-
-            if metadata_only:
-                logger.info(f"Fetched metadata for {len(documents)} documents from Google Drive")
-            else:
-                logger.info(f"Successfully loaded {len(documents)} documents from Google Drive")
-            return documents
+            # Return generator for streaming download+processing
+            return self._fetch_documents_streaming(
+                files,
+                metadata_only=metadata_only,
+                should_skip_callback=should_skip_callback
+            )
 
         except HttpError as e:
             logger.error(f"Google Drive API error: {e}")
@@ -263,6 +237,73 @@ class GoogleDriveConnector(BaseConnector):
         except Exception as e:
             logger.error(f"Error fetching from Google Drive: {e}")
             return []
+
+    def _fetch_documents_streaming(
+        self,
+        files: List[dict],
+        metadata_only: bool = False,
+        should_skip_callback: Optional[callable] = None,
+    ) -> List[Document]:
+        """Fetch documents with lazy loading.
+
+        First filters by should_skip, then returns list of file metadata.
+        Actual downloads happen lazily when iterating.
+
+        Args:
+            files: List of file metadata from Drive API
+            metadata_only: If True, only fetch metadata without downloading content
+            should_skip_callback: Optional callback to check if file should be skipped
+
+        Returns:
+            List of file metadata to download (not yet downloaded)
+        """
+        # Filter out files we should skip (just metadata check, no download)
+        files_to_download = []
+        skipped_count = 0
+
+        for file_info in files:
+            # Check if we should skip this file before downloading content
+            if should_skip_callback and not metadata_only:
+                # Extract metadata for skip check
+                file_id = file_info["id"]
+                file_name = file_info["name"]
+                modified_at = datetime.fromisoformat(
+                    file_info["modifiedTime"].replace("Z", "+00:00")
+                )
+
+                # Call the callback to check if we should skip
+                if should_skip_callback(file_id, modified_at, file_name):
+                    logger.debug(f"Skipping download for unchanged file: {file_name}")
+                    skipped_count += 1
+                    continue
+
+            files_to_download.append(file_info)
+
+        if skipped_count > 0:
+            logger.info(f"Skipped {skipped_count} unchanged files (will download {len(files_to_download)})")
+
+        # Return list of file metadata that need to be downloaded
+        # Actual downloads happen in download_file_batch
+        return files_to_download
+
+    def download_file_batch(self, files: List[dict], metadata_only: bool = False) -> List[Document]:
+        """Download a batch of files.
+
+        Args:
+            files: List of file metadata to download
+            metadata_only: If True, only fetch metadata without downloading content
+
+        Returns:
+            List of downloaded documents
+        """
+        documents = []
+
+        for file_info in files:
+            doc = self._fetch_file(file_info, metadata_only=metadata_only)
+            if doc:
+                documents.append(doc)
+
+        return documents
 
     def _fetch_file(self, file_info: dict, metadata_only: bool = False) -> Optional[Document]:
         """Fetch a single file from Google Drive.

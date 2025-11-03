@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from fastapi import FastAPI, HTTPException, Form
+from fastapi import FastAPI, HTTPException, Form, BackgroundTasks
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
@@ -49,6 +49,7 @@ def init_app(state: DaemonState, scheduler) -> FastAPI:
     async def get_status() -> Dict[str, Any]:
         """Get current daemon status."""
         last_run = _state.get_last_run()
+        active_run = _state.get_active_run()
 
         return {
             "scheduler_state": _state.get_config("scheduler_state"),
@@ -56,6 +57,7 @@ def init_app(state: DaemonState, scheduler) -> FastAPI:
             "run_mode": _state.get_config("run_mode"),
             "max_results": _state.get_config("max_results"),
             "last_run": last_run,
+            "active_run": active_run,  # Will be None if no active run
         }
 
     @app.get("/api/history")
@@ -98,9 +100,9 @@ def init_app(state: DaemonState, scheduler) -> FastAPI:
         return {"status": "updated"}
 
     @app.post("/api/trigger")
-    async def trigger_ingestion() -> Dict[str, str]:
+    async def trigger_ingestion(background_tasks: BackgroundTasks) -> Dict[str, str]:
         """Trigger manual ingestion now."""
-        _scheduler.trigger_now()
+        background_tasks.add_task(_scheduler.trigger_now)
         return {"status": "triggered"}
 
     @app.post("/api/pause")

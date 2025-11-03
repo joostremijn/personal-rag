@@ -2,6 +2,7 @@
 
 import json
 import logging
+import pickle
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -33,6 +34,38 @@ class OAuthManager:
         self.token_path = token_path
         self._creds: Optional[Credentials] = None
 
+    def _load_credentials(self) -> Optional[Credentials]:
+        """Load credentials from token file.
+
+        Handles both JSON format (new) and pickle format (legacy).
+        Auto-migrates pickle tokens to JSON.
+
+        Returns:
+            Credentials object or None if loading fails
+        """
+        if not self.token_path.exists():
+            return None
+
+        # Try JSON format first (new format)
+        try:
+            return Credentials.from_authorized_user_file(
+                str(self.token_path),
+                SCOPES
+            )
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            # Try pickle format (legacy format from GoogleDriveConnector)
+            try:
+                with open(self.token_path, 'rb') as f:
+                    creds = pickle.load(f)
+                # Convert to JSON format for future use
+                if creds:
+                    self._save_credentials(creds)
+                    logger.info("Migrated pickle token to JSON format")
+                return creds
+            except Exception as e:
+                logger.warning(f"Failed to load pickle token: {e}")
+                return None
+
     def get_status(self) -> Dict[str, Any]:
         """Get current OAuth authentication status.
 
@@ -40,13 +73,7 @@ class OAuthManager:
             Dictionary with authenticated (bool) and email (str or None)
         """
         try:
-            if not self.token_path.exists():
-                return {"authenticated": False, "email": None}
-
-            creds = Credentials.from_authorized_user_file(
-                str(self.token_path),
-                SCOPES
-            )
+            creds = self._load_credentials()
 
             if not creds or not creds.valid:
                 if creds and creds.expired and creds.refresh_token:

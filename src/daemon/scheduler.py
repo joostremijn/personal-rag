@@ -105,34 +105,45 @@ class DaemonScheduler:
 
     def _execute_ingestion(self) -> None:
         """Execute the ingestion run."""
-        # Load enabled sources
-        sources_data = self.state.get_sources(enabled_only=True)
-        sources = [Source.from_dict(s) for s in sources_data]
+        try:
+            # Mark run as active
+            self.state.set_active_run("Starting ingestion...")
 
-        if not sources:
-            logger.warning("No enabled sources configured")
-            return
+            # Load enabled sources
+            sources_data = self.state.get_sources(enabled_only=True)
+            sources = [Source.from_dict(s) for s in sources_data]
 
-        # Run multi-source ingestion
-        runner = MultiSourceIngestionRunner(time_budget=600)  # 10 minutes
-        result = runner.run_ingestion(sources)
+            if not sources:
+                logger.warning("No enabled sources configured")
+                self.state.clear_active_run()
+                return
 
-        # Record result
-        self.state.record_run(result)
-
-        # Handle result
-        if result.success:
-            logger.info(
-                f"Ingestion successful: {result.processed_docs} processed, "
-                f"{result.skipped_docs} skipped in {result.duration:.2f}s"
+            # Run multi-source ingestion with state for progress reporting
+            runner = MultiSourceIngestionRunner(
+                time_budget=600,  # 10 minutes
+                state=self.state
             )
-            if result.source_breakdown:
-                for source_name, stats in result.source_breakdown.items():
-                    logger.info(f"  {source_name}: {stats['processed']} processed, {stats['skipped']} skipped")
-        else:
-            logger.error(f"Ingestion failed: {result.error}")
-            # Send notification on failure
-            send_notification(
-                "RAG Ingestion Failed",
-                f"Error: {result.error[:100]}"  # Truncate long errors
-            )
+            result = runner.run_ingestion(sources)
+
+            # Record result
+            self.state.record_run(result)
+
+            # Handle result
+            if result.success:
+                logger.info(
+                    f"Ingestion successful: {result.processed_docs} processed, "
+                    f"{result.skipped_docs} skipped in {result.duration:.2f}s"
+                )
+                if result.source_breakdown:
+                    for source_name, stats in result.source_breakdown.items():
+                        logger.info(f"  {source_name}: {stats['processed']} processed, {stats['skipped']} skipped")
+            else:
+                logger.error(f"Ingestion failed: {result.error}")
+                # Send notification on failure
+                send_notification(
+                    "RAG Ingestion Failed",
+                    f"Error: {result.error[:100]}"  # Truncate long errors
+                )
+        finally:
+            # Always clear active run when done
+            self.state.clear_active_run()

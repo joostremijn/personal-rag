@@ -3,10 +3,10 @@
 import logging
 import time
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from src.daemon.models import Source, SourceType
-from src.daemon.state import RunResult
+from src.daemon.state import RunResult, DaemonState
 from src.ingestion import IngestionPipeline
 from src.connectors.local import LocalFileConnector
 from src.connectors.gdrive import GoogleDriveConnector
@@ -21,13 +21,15 @@ PROCESSING_BATCH_SIZE = 10  # Download + process 10 at a time
 class MultiSourceIngestionRunner:
     """Runs ingestion across multiple sources with time limits."""
 
-    def __init__(self, time_budget: int = 600):
+    def __init__(self, time_budget: int = 600, state: Optional[DaemonState] = None):
         """Initialize runner.
 
         Args:
             time_budget: Total time budget in seconds (default: 10 minutes)
+            state: Optional DaemonState for progress reporting
         """
         self.time_budget = time_budget
+        self.state = state
 
     def run_ingestion(self, sources: List[Source]) -> RunResult:
         """Run ingestion for all enabled sources.
@@ -87,7 +89,8 @@ class MultiSourceIngestionRunner:
                     total_chunks += stats["chunks"]
                     source_breakdown[source.name] = {
                         "processed": stats["processed"],
-                        "skipped": stats["skipped"]
+                        "skipped": stats["skipped"],
+                        "chunks": stats["chunks"]
                     }
 
                     logger.info(
@@ -156,6 +159,11 @@ class MultiSourceIngestionRunner:
             connector = LocalFileConnector(str(source.local_path))
             documents = connector.load_documents()
 
+            if self.state:
+                self.state.set_active_run(
+                    f"Processing {source.name}: found {len(documents)} files"
+                )
+
             # Process in batches
             for i in range(0, len(documents), PROCESSING_BATCH_SIZE):
                 if time.time() - start >= time_budget:
@@ -167,15 +175,64 @@ class MultiSourceIngestionRunner:
                 skipped += skip
                 total_chunks += chunks
 
+                if self.state:
+                    self.state.set_active_run(
+                        f"Processing {source.name}: {processed + skipped}/{len(documents)} files processed"
+                    )
+
         elif source.source_type == SourceType.GDRIVE:
-            # Google Drive: two-phase processing
+            # Google Drive: download and index in batches for streaming progress
             connector = GoogleDriveConnector()
 
-            # Phase 1: Fetch metadata in large batches (250 at a time)
-            # Phase 2: Download + process in small batches (10 at a time)
-            # TODO: Implement two-phase processing in next task
+            if self.state:
+                self.state.set_active_run(f"Fetching metadata from {source.name}...")
 
-            processed, skipped, total_chunks = 0, 0, 0
+            # Fetch file metadata and filter by should_skip (no downloads yet)
+            # Returns list of file metadata that need downloading
+            files_to_download = connector.fetch_documents(
+                mode=source.ingestion_mode,
+                max_results=None,  # No limit - fetch all matching documents
+                folder_id=source.folder_id,
+                days_back=source.days_back,
+                should_skip_callback=pipeline.should_skip_by_metadata  # Skip download if unchanged
+            )
+
+            total_files = len(files_to_download)
+            if self.state:
+                self.state.set_active_run(
+                    f"Downloading {source.name}: 0/{total_files} files processed"
+                )
+
+            # Download and index in batches of 10
+            # This makes the index grow continuously during the run
+            batch_size = 10
+
+            for i in range(0, total_files, batch_size):
+                batch_files = files_to_download[i:i + batch_size]
+
+                # Download this batch of files
+                documents = connector.download_file_batch(batch_files)
+
+                # Index this batch immediately
+                batch_stats = pipeline.ingest_documents_incremental(
+                    documents,
+                    skip_unchanged=False  # Already filtered during metadata check
+                )
+
+                processed += batch_stats.total_documents
+                skipped += batch_stats.skipped_documents
+                total_chunks += batch_stats.total_chunks
+
+                if self.state:
+                    files_done = min(i + batch_size, total_files)
+                    self.state.set_active_run(
+                        f"Processing {source.name}: {files_done}/{total_files} files ({processed} indexed, {total_chunks} chunks)"
+                    )
+
+            if self.state:
+                self.state.set_active_run(
+                    f"Completed {source.name}: {processed} processed, {skipped} skipped, {total_chunks} chunks"
+                )
 
         return {
             "processed": processed,

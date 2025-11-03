@@ -376,6 +376,17 @@
             html += `<p>Interval: ${data.interval} minutes</p>`;
             html += `<p>Mode: ${data.run_mode}</p>`;
 
+            // Show active run if one is in progress
+            if (data.active_run) {
+                html += '<div style="background: #fff3cd; padding: 10px; margin: 10px 0; border-radius: 5px;">';
+                html += '<p style="margin: 0; font-weight: bold; color: #856404;">⏳ Ingestion Running...</p>';
+                html += `<p style="margin: 5px 0 0 0; color: #856404;">${data.active_run.status}</p>`;
+                const startTime = new Date(data.active_run.start_time);
+                const elapsed = Math.floor((new Date() - startTime) / 1000);
+                html += `<p style="margin: 5px 0 0 0; font-size: 0.9em; color: #856404;">Started: ${startTime.toLocaleTimeString()} (${elapsed}s ago)</p>`;
+                html += '</div>';
+            }
+
             if (data.last_run) {
                 html += `<p>Last Run: ${new Date(data.last_run.timestamp).toLocaleString()}</p>`;
                 html += `<p>Result: ${data.last_run.success ? 'Success' : 'Failed'}</p>`;
