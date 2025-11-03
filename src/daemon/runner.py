@@ -1,21 +1,251 @@
-"""Ingestion execution wrapper with monitoring."""
+"""Multi-source ingestion runner with time limits."""
 
-import time
 import logging
+import time
 from datetime import datetime
-from typing import Optional
+from typing import List, Dict, Any, Optional
 
-from src.daemon.state import RunResult
+from src.daemon.models import Source, SourceType
+from src.daemon.state import RunResult, DaemonState
 from src.ingestion import IngestionPipeline
+from src.connectors.local import LocalFileConnector
 from src.connectors.gdrive import GoogleDriveConnector
+from src.models import Document
 
 logger = logging.getLogger(__name__)
 
+METADATA_BATCH_SIZE = 250  # Fetch 250 file metadata per API call
+PROCESSING_BATCH_SIZE = 10  # Download + process 10 at a time
 
+
+class MultiSourceIngestionRunner:
+    """Runs ingestion across multiple sources with time limits."""
+
+    def __init__(self, time_budget: int = 600, state: Optional[DaemonState] = None):
+        """Initialize runner.
+
+        Args:
+            time_budget: Total time budget in seconds (default: 10 minutes)
+            state: Optional DaemonState for progress reporting
+        """
+        self.time_budget = time_budget
+        self.state = state
+
+    def run_ingestion(self, sources: List[Source]) -> RunResult:
+        """Run ingestion for all enabled sources.
+
+        Args:
+            sources: List of sources to process
+
+        Returns:
+            RunResult with aggregated stats
+        """
+        start_time = time.time()
+
+        try:
+            # Separate by type (Drive first, then local)
+            gdrive_sources = [s for s in sources if s.source_type == SourceType.GDRIVE]
+            local_sources = [s for s in sources if s.source_type == SourceType.LOCAL]
+            all_sources = gdrive_sources + local_sources
+
+            if not all_sources:
+                return RunResult(
+                    success=True,
+                    duration=0,
+                    processed_docs=0,
+                    skipped_docs=0,
+                    total_chunks=0,
+                    error=None,
+                    timestamp=datetime.now(),
+                    source_breakdown={}
+                )
+
+            # Allocate time per source
+            per_source_budget = self.time_budget / len(all_sources)
+
+            # Initialize pipeline
+            pipeline = IngestionPipeline()
+
+            # Process each source
+            total_processed = 0
+            total_skipped = 0
+            total_chunks = 0
+            source_breakdown = {}
+
+            for source in all_sources:
+                if time.time() - start_time >= self.time_budget:
+                    logger.warning("Time budget exhausted, stopping early")
+                    break
+
+                try:
+                    stats = self._process_source(
+                        source,
+                        pipeline,
+                        per_source_budget
+                    )
+
+                    total_processed += stats["processed"]
+                    total_skipped += stats["skipped"]
+                    total_chunks += stats["chunks"]
+                    source_breakdown[source.name] = {
+                        "processed": stats["processed"],
+                        "skipped": stats["skipped"],
+                        "chunks": stats["chunks"]
+                    }
+
+                    logger.info(
+                        f"Source '{source.name}': {stats['processed']} processed, "
+                        f"{stats['skipped']} skipped"
+                    )
+
+                except Exception as e:
+                    logger.error(f"Error processing source '{source.name}': {e}")
+                    source_breakdown[source.name] = {
+                        "processed": 0,
+                        "skipped": 0,
+                        "error": str(e)
+                    }
+
+            duration = time.time() - start_time
+
+            return RunResult(
+                success=True,
+                duration=duration,
+                processed_docs=total_processed,
+                skipped_docs=total_skipped,
+                total_chunks=total_chunks,
+                error=None,
+                timestamp=datetime.now(),
+                source_breakdown=source_breakdown
+            )
+
+        except Exception as e:
+            logger.error(f"Ingestion failed: {e}")
+            duration = time.time() - start_time
+
+            return RunResult(
+                success=False,
+                duration=duration,
+                processed_docs=0,
+                skipped_docs=0,
+                total_chunks=0,
+                error=str(e),
+                timestamp=datetime.now()
+            )
+
+    def _process_source(
+        self,
+        source: Source,
+        pipeline: IngestionPipeline,
+        time_budget: float
+    ) -> Dict[str, int]:
+        """Process a single source.
+
+        Args:
+            source: Source to process
+            pipeline: Ingestion pipeline
+            time_budget: Time budget for this source
+
+        Returns:
+            Stats dict with processed, skipped, chunks
+        """
+        start = time.time()
+        processed = 0
+        skipped = 0
+        total_chunks = 0
+
+        if source.source_type == SourceType.LOCAL:
+            # Local source: simple recursive scan
+            connector = LocalFileConnector(str(source.local_path))
+            documents = connector.load_documents()
+
+            if self.state:
+                self.state.set_active_run(
+                    f"Processing {source.name}: found {len(documents)} files"
+                )
+
+            # Process in batches
+            for i in range(0, len(documents), PROCESSING_BATCH_SIZE):
+                if time.time() - start >= time_budget:
+                    break
+
+                batch = documents[i:i + PROCESSING_BATCH_SIZE]
+                proc, skip, chunks = pipeline.ingest_documents(batch)
+                processed += proc
+                skipped += skip
+                total_chunks += chunks
+
+                if self.state:
+                    self.state.set_active_run(
+                        f"Processing {source.name}: {processed + skipped}/{len(documents)} files processed"
+                    )
+
+        elif source.source_type == SourceType.GDRIVE:
+            # Google Drive: download and index in batches for streaming progress
+            connector = GoogleDriveConnector()
+
+            if self.state:
+                self.state.set_active_run(f"Fetching metadata from {source.name}...")
+
+            # Fetch file metadata and filter by should_skip (no downloads yet)
+            # Returns list of file metadata that need downloading
+            files_to_download = connector.fetch_documents(
+                mode=source.ingestion_mode,
+                max_results=None,  # No limit - fetch all matching documents
+                folder_id=source.folder_id,
+                days_back=source.days_back,
+                should_skip_callback=pipeline.should_skip_by_metadata  # Skip download if unchanged
+            )
+
+            total_files = len(files_to_download)
+            if self.state:
+                self.state.set_active_run(
+                    f"Downloading {source.name}: 0/{total_files} files processed"
+                )
+
+            # Download and index in batches of 10
+            # This makes the index grow continuously during the run
+            batch_size = 10
+
+            for i in range(0, total_files, batch_size):
+                batch_files = files_to_download[i:i + batch_size]
+
+                # Download this batch of files
+                documents = connector.download_file_batch(batch_files)
+
+                # Index this batch immediately
+                batch_stats = pipeline.ingest_documents_incremental(
+                    documents,
+                    skip_unchanged=False  # Already filtered during metadata check
+                )
+
+                processed += batch_stats.total_documents
+                skipped += batch_stats.skipped_documents
+                total_chunks += batch_stats.total_chunks
+
+                if self.state:
+                    files_done = min(i + batch_size, total_files)
+                    self.state.set_active_run(
+                        f"Processing {source.name}: {files_done}/{total_files} files ({processed} indexed, {total_chunks} chunks)"
+                    )
+
+            if self.state:
+                self.state.set_active_run(
+                    f"Completed {source.name}: {processed} processed, {skipped} skipped, {total_chunks} chunks"
+                )
+
+        return {
+            "processed": processed,
+            "skipped": skipped,
+            "chunks": total_chunks
+        }
+
+
+# Keep old IngestionRunner for backward compatibility
 class IngestionRunner:
-    """Wraps ingestion pipeline with monitoring and error handling."""
+    """Legacy single-source runner (deprecated)."""
 
-    def __init__(self, max_results: int = 100) -> None:
+    def __init__(self, max_results: int = 100):
         """Initialize ingestion runner.
 
         Args:

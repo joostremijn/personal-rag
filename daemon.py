@@ -29,6 +29,34 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def migrate_to_multi_source(state: DaemonState) -> None:
+    """Migrate existing single-source config to multi-source.
+
+    Args:
+        state: Daemon state
+    """
+    # Check if migration needed (no sources exist, but config does)
+    sources = state.get_sources()
+
+    if len(sources) == 0:
+        max_results = state.get_config("max_results")
+
+        if max_results:  # Existing user
+            logger.info("Migrating existing config to multi-source")
+
+            # Create default Google Drive source
+            state.create_source({
+                "name": "Google Drive (auto-migrated)",
+                "source_type": "gdrive",
+                "enabled": True,
+                "folder_id": None,
+                "ingestion_mode": "accessed",
+                "days_back": 730
+            })
+
+            logger.info("Migration complete: created default Google Drive source")
+
+
 class PersonalRAGDaemon:
     """Main daemon orchestrator."""
 
@@ -45,6 +73,10 @@ class PersonalRAGDaemon:
         # Initialize components
         logger.info("Initializing daemon components")
         self.state = DaemonState(db_path)
+
+        # Run migration
+        migrate_to_multi_source(self.state)
+
         self.scheduler = DaemonScheduler(self.state)
         self.app = init_app(self.state, self.scheduler)
 

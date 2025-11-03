@@ -21,13 +21,20 @@ def test_scheduler_initialization():
         assert scheduler.scheduler is not None
 
 
-@patch('src.daemon.scheduler.IngestionRunner')
+@patch('src.daemon.scheduler.MultiSourceIngestionRunner')
 @patch('src.daemon.scheduler.should_run')
 def test_scheduler_job_execution(mock_should_run, mock_runner):
     """Test scheduler executes job."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
         state = DaemonState(db_path)
+
+        # Create a test source
+        state.create_source({
+            "name": "Test Source",
+            "source_type": "gdrive",
+            "enabled": True
+        })
 
         # Mock conditions to allow run
         mock_should_run.return_value = (True, "Test condition met")

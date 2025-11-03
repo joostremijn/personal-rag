@@ -4,11 +4,12 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, HTTPException, Form, BackgroundTasks
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
 from src.daemon.state import DaemonState
+from src.daemon.oauth import OAuthManager
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,9 @@ def init_app(state: DaemonState, scheduler) -> FastAPI:
     _state = state
     _scheduler = scheduler
 
+    # Initialize OAuth manager
+    oauth_manager = OAuthManager()
+
     app = FastAPI(title="Personal RAG Daemon")
 
     @app.get("/", response_class=HTMLResponse)
@@ -45,6 +49,7 @@ def init_app(state: DaemonState, scheduler) -> FastAPI:
     async def get_status() -> Dict[str, Any]:
         """Get current daemon status."""
         last_run = _state.get_last_run()
+        active_run = _state.get_active_run()
 
         return {
             "scheduler_state": _state.get_config("scheduler_state"),
@@ -52,6 +57,7 @@ def init_app(state: DaemonState, scheduler) -> FastAPI:
             "run_mode": _state.get_config("run_mode"),
             "max_results": _state.get_config("max_results"),
             "last_run": last_run,
+            "active_run": active_run,  # Will be None if no active run
         }
 
     @app.get("/api/history")
@@ -94,9 +100,9 @@ def init_app(state: DaemonState, scheduler) -> FastAPI:
         return {"status": "updated"}
 
     @app.post("/api/trigger")
-    async def trigger_ingestion() -> Dict[str, str]:
+    async def trigger_ingestion(background_tasks: BackgroundTasks) -> Dict[str, str]:
         """Trigger manual ingestion now."""
-        _scheduler.trigger_now()
+        background_tasks.add_task(_scheduler.trigger_now)
         return {"status": "triggered"}
 
     @app.post("/api/pause")
@@ -122,5 +128,107 @@ def init_app(state: DaemonState, scheduler) -> FastAPI:
             all_lines = f.readlines()
             recent_lines = all_lines[-lines:]
             return {"logs": recent_lines}
+
+    @app.get("/api/oauth/status")
+    async def oauth_status():
+        """Get OAuth authentication status."""
+        return oauth_manager.get_status()
+
+    @app.get("/api/oauth/authorize")
+    async def oauth_authorize():
+        """Start OAuth flow."""
+        try:
+            auth_url = oauth_manager.get_authorization_url()
+            # Return HTML page with instructions
+            html_content = f"""
+            <!DOCTYPE html>
+            <html>
+            <head><title>Google Drive Authorization</title></head>
+            <body style="font-family: sans-serif; max-width: 600px; margin: 50px auto;">
+                <h2>Authorize Google Drive Access</h2>
+                <p>Click the button below to authorize Personal RAG to access your Google Drive:</p>
+                <p><a href="{auth_url}" target="_blank" style="display: inline-block; background: #4285f4; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px;">Authorize Google Drive</a></p>
+                <p style="margin-top: 30px; color: #666;">After authorizing, copy the code and paste it below:</p>
+                <form action="/api/oauth/callback" method="post" style="margin-top: 20px;">
+                    <input type="text" name="code" placeholder="Paste authorization code here" style="width: 100%; padding: 10px; font-size: 14px;" required>
+                    <button type="submit" style="margin-top: 10px; background: #34a853; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer;">Complete Authorization</button>
+                </form>
+            </body>
+            </html>
+            """
+            return HTMLResponse(content=html_content)
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+
+    @app.post("/api/oauth/callback")
+    async def oauth_callback(code: str = Form(...)):
+        """Handle OAuth callback."""
+        result = oauth_manager.exchange_code(code)
+
+        if result["success"]:
+            # Redirect to dashboard with success message
+            return RedirectResponse(url="/?oauth=success", status_code=303)
+        else:
+            raise HTTPException(status_code=400, detail=result.get("error"))
+
+    @app.post("/api/oauth/disconnect")
+    async def oauth_disconnect():
+        """Disconnect Google Drive."""
+        oauth_manager.disconnect()
+        return {"success": True}
+
+    @app.get("/api/sources")
+    async def list_sources():
+        """List all sources."""
+        sources = _state.get_sources()
+        return {"sources": sources}
+
+    @app.post("/api/sources")
+    async def create_source(source: Dict[str, Any]):
+        """Create a new source."""
+        try:
+            source_id = _state.create_source(source)
+            return {"success": True, "id": source_id}
+        except Exception as e:
+            logger.error(f"Failed to create source: {e}")
+            raise HTTPException(status_code=400, detail=str(e))
+
+    @app.get("/api/sources/{source_id}")
+    async def get_source(source_id: int):
+        """Get a single source."""
+        source = _state.get_source(source_id)
+        if source:
+            return source
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    @app.put("/api/sources/{source_id}")
+    async def update_source(source_id: int, data: Dict[str, Any]):
+        """Update a source."""
+        try:
+            _state.update_source(source_id, data)
+            return {"success": True}
+        except Exception as e:
+            logger.error(f"Failed to update source: {e}")
+            raise HTTPException(status_code=400, detail=str(e))
+
+    @app.delete("/api/sources/{source_id}")
+    async def delete_source(source_id: int):
+        """Delete a source."""
+        try:
+            _state.delete_source(source_id)
+            return {"success": True}
+        except Exception as e:
+            logger.error(f"Failed to delete source: {e}")
+            raise HTTPException(status_code=400, detail=str(e))
+
+    @app.post("/api/sources/{source_id}/toggle")
+    async def toggle_source(source_id: int):
+        """Toggle source enabled status."""
+        source = _state.get_source(source_id)
+        if not source:
+            raise HTTPException(status_code=404, detail="Source not found")
+
+        _state.update_source(source_id, {"enabled": not source["enabled"]})
+        return {"success": True, "enabled": not source["enabled"]}
 
     return app

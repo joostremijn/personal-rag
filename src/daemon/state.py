@@ -17,6 +17,7 @@ class RunResult:
     total_chunks: int
     error: Optional[str]
     timestamp: datetime
+    source_breakdown: Optional[Dict[str, Dict[str, int]]] = None
 
 
 class DaemonState:
@@ -52,7 +53,28 @@ class DaemonState:
                     skipped_docs INTEGER,
                     total_chunks INTEGER,
                     error TEXT,
+                    source_breakdown TEXT,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Sources table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS sources (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    source_type TEXT NOT NULL,
+                    enabled BOOLEAN DEFAULT 1,
+
+                    folder_id TEXT,
+                    ingestion_mode TEXT DEFAULT 'accessed',
+                    days_back INTEGER DEFAULT 730,
+
+                    local_path TEXT,
+                    recursive BOOLEAN DEFAULT 1,
+
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
 
@@ -109,12 +131,18 @@ class DaemonState:
         Args:
             result: Run result to record
         """
+        import json
+
+        source_breakdown_json = None
+        if result.source_breakdown:
+            source_breakdown_json = json.dumps(result.source_breakdown)
+
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
                 """
                 INSERT INTO run_history
-                (timestamp, success, duration, processed_docs, skipped_docs, total_chunks, error)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                (timestamp, success, duration, processed_docs, skipped_docs, total_chunks, error, source_breakdown)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     result.timestamp.isoformat(),
@@ -124,6 +152,7 @@ class DaemonState:
                     result.skipped_docs,
                     result.total_chunks,
                     result.error,
+                    source_breakdown_json,
                 )
             )
             conn.commit()
@@ -170,3 +199,134 @@ class DaemonState:
         """
         history = self.get_history(limit=1)
         return history[0] if history else None
+
+    def set_active_run(self, status: str) -> None:
+        """Set active run status (for in-progress runs).
+
+        Args:
+            status: Status message (e.g., "Fetching documents...", "Processing 10/100")
+        """
+        self.set_config("active_run_status", status)
+        self.set_config("active_run_start", datetime.now().isoformat())
+
+    def get_active_run(self) -> Optional[Dict[str, str]]:
+        """Get active run status if one is in progress.
+
+        Returns:
+            Dict with status and start_time, or None if no active run
+        """
+        status = self.get_config("active_run_status")
+        if status:
+            start_time = self.get_config("active_run_start")
+            return {"status": status, "start_time": start_time}
+        return None
+
+    def clear_active_run(self) -> None:
+        """Clear active run status (when run completes)."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("DELETE FROM config WHERE key IN ('active_run_status', 'active_run_start')")
+            conn.commit()
+
+    def create_source(self, data: Dict[str, Any]) -> int:
+        """Create a new source.
+
+        Args:
+            data: Source configuration
+
+        Returns:
+            ID of created source
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO sources
+                (name, source_type, enabled, folder_id, ingestion_mode, days_back, local_path, recursive)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    data["name"],
+                    data["source_type"],
+                    data.get("enabled", True),
+                    data.get("folder_id"),
+                    data.get("ingestion_mode", "accessed"),
+                    data.get("days_back", 730),
+                    data.get("local_path"),
+                    data.get("recursive", True),
+                )
+            )
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_sources(self, enabled_only: bool = False) -> List[Dict[str, Any]]:
+        """Get all sources.
+
+        Args:
+            enabled_only: If True, return only enabled sources
+
+        Returns:
+            List of source dictionaries
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            query = "SELECT * FROM sources"
+            if enabled_only:
+                query += " WHERE enabled = 1"
+            query += " ORDER BY created_at DESC"
+
+            cursor = conn.execute(query)
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_source(self, source_id: int) -> Optional[Dict[str, Any]]:
+        """Get a single source by ID.
+
+        Args:
+            source_id: Source ID
+
+        Returns:
+            Source dictionary or None
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute(
+                "SELECT * FROM sources WHERE id = ?",
+                (source_id,)
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def update_source(self, source_id: int, data: Dict[str, Any]) -> None:
+        """Update a source.
+
+        Args:
+            source_id: Source ID
+            data: Fields to update
+        """
+        fields = []
+        values = []
+
+        for key, value in data.items():
+            if key != "id":
+                fields.append(f"{key} = ?")
+                values.append(value)
+
+        if not fields:
+            return
+
+        values.append(source_id)
+
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                f"UPDATE sources SET {', '.join(fields)}, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                values
+            )
+            conn.commit()
+
+    def delete_source(self, source_id: int) -> None:
+        """Delete a source.
+
+        Args:
+            source_id: Source ID
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("DELETE FROM sources WHERE id = ?", (source_id,))
+            conn.commit()
